@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motor Interkom</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #222; color: #fff; padding: 20px; }
+        button { padding: 15px 30px; font-size: 18px; margin: 10px; border-radius: 8px; border: none; cursor: pointer; }
+        .connect { background: #28a745; color: white; }
+        .status { margin-top: 20px; color: #aaa; }
+    </style>
+</head>
+<body>
+
+    <h1>🏍️ Kask Interkom</h1>
+    
+    <div>
+        <p>Senin ID'n: <b id="my-id" style="color: #007bff;">Yükleniyor...</b></p>
+    </div>
+
+    <hr style="border-color: #444;">
+
+    <div>
+        <input type="text" id="peer-id" placeholder="Arkadaşının ID'sini yaz" style="padding: 12px; font-size: 16px; border-radius: 5px; width: 80%; max-width: 300px;">
+        <br>
+        <button class="connect" onclick="arkadasiAra()">Bağlan (Konuşmayı Başlat)</button>
+    </div>
+
+    <p class="status" id="status-text">Durum: Bekleniyor...</p>
+
+    <audio id="remote-audio" autoplay playsinline></audio>
+
+    <script>
+        let localStream;
+        // PeerJS'in tamamen ücretsiz olan bulut sunucusuna bağlanıyoruz (Sıfır Maliyet!)
+        const peer = new Peer(); 
+
+        // 1. Mikrofonu aç ve ses ayarlamalarını yap (Yankı ve gürültü engelleme aktif)
+        navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            }, 
+            video: false 
+        }).then(stream => {
+            localStream = stream;
+            document.getElementById('status-text').innerText = "Durum: Mikrofon hazır. Bağlantı bekleniyor.";
+        }).catch(err => {
+            alert("Mikrofon izni verilmedi veya tarayıcı desteklemiyor!");
+        });
+
+        // 2. PeerJS bize rastgele bir ID verdiğinde ekrana yazdırıyoruz
+        peer.on('open', id => {
+            document.getElementById('my-id').innerText = id;
+        });
+
+        // 3. GELEN ARAMALARI KARŞILAMA (Arkadaşın aradığında otomatik açılır)
+        peer.on('call', call => {
+            document.getElementById('status-text').innerText = "Durum: Bağlantı kuruldu! Konuşuluyor...";
+            call.answer(localStream); // Kendi sesimizi gönderiyoruz
+            
+            call.on('stream', remoteStream => {
+                // Karşı tarafın sesini kaska veriyoruz
+                const audio = document.getElementById('remote-audio');
+                audio.srcObject = remoteStream;
+            });
+        });
+
+        // 4. ARKADAŞINI ARAMA FONKSİYONU
+        function arkadasiAra() {
+            const id = document.getElementById('peer-id').value;
+            if(!id) return alert("Lütfen arkadaşının ID'sini gir!");
+
+            document.getElementById('status-text').innerText = "Durum: Aranıyor...";
+            const call = peer.call(id, localStream);
+
+            call.on('stream', remoteStream => {
+                document.getElementById('status-text').innerText = "Durum: Bağlantı kuruldu! Konuşuluyor...";
+                const audio = document.getElementById('remote-audio');
+                audio.srcObject = remoteStream;
+            });
+        }
+    </script>
+</body>
+</html>
