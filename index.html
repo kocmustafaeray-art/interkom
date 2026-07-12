@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RideCom Pro v4</title>
+    <title>RideCom Room v6</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -15,88 +15,136 @@
         }
         .header h1 { font-size: 26px; color: #ff9800; text-align: center; letter-spacing: 2px; margin-top: 10px; }
         .status-panel { background: #1e1e1e; border-left: 5px solid #555; padding: 15px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 16px; margin: 15px 0; }
-        .status-ready { border-left-color: #00e676; color: #00e676; }
-        .status-connected { border-left-color: #29b6f6; color: #29b6f6; animation: pulse 2s infinite; }
+        .status-ready { border-left-color: #ff9800; color: #ff9800; }
+        .status-connected { border-left-color: #00e676; color: #00e676; animation: pulse 2s infinite; }
         .status-error { border-left-color: #ff1744; color: #ff1744; }
         @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
-        .id-section { background: #1e1e1e; padding: 15px; border-radius: 12px; text-align: center; }
-        .id-value { font-size: 32px; font-weight: bold; color: #ff9800; display: block; margin-bottom: 10px; letter-spacing: 2px; }
-        .btn { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
+        
+        .room-section { background: #1e1e1e; padding: 20px; border-radius: 12px; text-align: center; margin: 15px 0; }
+        
+        .btn { width: 100%; padding: 22px; font-size: 18px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
         .btn:active { transform: scale(0.98); }
-        .btn-copy { background: #37474f; color: white; padding: 12px; font-size: 14px; }
-        .btn-connect { background: #ff9800; color: #121212; margin-top: 10px; }
+        
+        .btn-join { background: #ff9800; color: #121212; }
         .btn-mute { background: #0288d1; color: white; display: none; }
         .btn-muted { background: #d32f2f; color: white; animation: pulse 1s infinite; }
         .btn-disconnect { background: #b71c1c; color: white; display: none; }
-        .input-group { margin: 15px 0; }
-        input[type="text"] { width: 100%; padding: 18px; font-size: 20px; background: #2d2d2d; border: 2px solid #444; color: white; border-radius: 12px; text-align: center; outline: none; }
-        input[type="text"]:focus { border-color: #ff9800; }
+        
         .footer { text-align: center; font-size: 11px; color: #444; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1>🏍️ RIDE COM PRO</h1>
+        <h1>🏍️ RIDE COM ROOM</h1>
     </div>
 
     <div class="status-panel" id="status-box">Sistem Başlatılıyor...</div>
 
-    <div class="id-section" id="id-panel">
-        <span style="font-size: 12px; color: #aaa;">KASK GİRİŞ KODUN</span>
-        <span id="my-id" class="id-value">....</span>
-        <button class="btn btn-copy" onclick="kodKopyala()">Kodu Kopyala</button>
-    </div>
-
-    <div class="input-group" id="setup-controls">
-        <input type="text" id="peer-id" placeholder="Arkadaşının 4 Haneli Kodunu Yaz">
-        <button class="btn btn-connect" onclick="arkadasiAra()">Yolculuğu Başlat</button>
+    <div class="room-section" id="room-panel">
+        <span style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">BAĞLANILACAK ORTAK ODA</span>
+        <h2 style="color: #ff9800; letter-spacing: 1px;">KASK_INTERKOM_ODASI</h2>
+        
+        <button class="btn btn-join" id="join-btn" style="margin-top: 20px;" onclick="odayaBaglan()">Odaya Gir ve Bağlan</button>
     </div>
 
     <div id="ride-controls">
         <button class="btn btn-mute" id="mute-btn" onclick="sesiSustur()">🎤 MİKROFONU SUSTUR</button>
-        <button class="btn btn-disconnect" id="disconnect-btn" onclick="baglantiyiKes()">❌ YOLCULUĞU BİTİR (AYRIL)</button>
+        <button class="btn btn-disconnect" id="disconnect-btn" onclick="odadanAyril()">❌ ODADAN AYRIL</button>
     </div>
 
-    <div class="footer">v4.0 - Kısa Kod & Güvenli Sürüş Paneli</div>
+    <div class="footer">v6.0 - Hazır Oda Modu</div>
 
     <audio id="remote-audio" autoplay playsinline></audio>
 
     <script>
         let localStream, currentCall, isMuted = false;
+        let peer = null;
         
-        // Rastgele 4 haneli kod üretiyoruz
-        const kisaID = Math.floor(1000 + Math.random() * 9000).toString();
-        const peer = new Peer(kisaID); 
+        // İkiniz için tamamen benzersiz ve SABİT ortak oda isimleri
+        const ODA_1 = "kask-interkom-oda-a";
+        const ODA_2 = "kask-interkom-oda-b";
         
         const statusBox = document.getElementById('status-box');
         const muteBtn = document.getElementById('mute-btn');
         const disconnectBtn = document.getElementById('disconnect-btn');
-        const setupControls = document.getElementById('setup-controls');
-        const idPanel = document.getElementById('id-panel');
+        const roomPanel = document.getElementById('room-panel');
+        const joinBtn = document.getElementById('join-btn');
 
         function durumGuncelle(mesaj, tip) {
             statusBox.innerText = mesaj;
             statusBox.className = "status-panel " + tip;
         }
 
+        // Mikrofonu ilk açılışta hazırla
         navigator.mediaDevices.getUserMedia({ 
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false 
         }).then(stream => {
             localStream = stream;
-            durumGuncelle("BAĞLANTIYA HAZIR", "status-ready");
+            durumGuncelle("ODAYA GİRMEYE HAZIR", "status-ready");
         }).catch(() => {
             durumGuncelle("MİKROFON İZNİ ALINAMADI!", "status-error");
         });
 
-        peer.on('open', id => { document.getElementById('my-id').innerText = id; });
+        function odayaBaglan() {
+            durumGuncelle("ODAYA GİRİLİYOR...", "status-ready");
+            joinBtn.disabled = true;
+
+            // Önce ODA_1 olarak bağlanmayı deniyoruz
+            peer = new Peer(ODA_1, {
+                config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }, { 'urls': 'stun:stun1.l.google.com:19302' }] }
+            });
+
+            peer.on('open', () => {
+                // Eğer ODA_1 boşsa, biz "Dinleyici/Sunucu" konumundayız demektir. Arkadaşımızı bekliyoruz.
+                durumGuncelle("ODADA TEK BAŞINASIN. ARKADAŞIN BEKLENİYOR...", "status-ready");
+                surusModu(true);
+            });
+
+            peer.on('error', (err) => {
+                // Eğer ODA_1 zaten doluysa (yani arkadaşın odaya senden önce girdiyse) hata verir.
+                // Bu durumda biz ODA_2 kimliğiyle açılıp, içerideki ODA_1'i otomatik arayacağız.
+                if (err.type === 'unavailable-id') {
+                    peer.destroy(); // Eski bağlantıyı temizle
+                    
+                    peer = new Peer(ODA_2, {
+                        config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }, { 'urls': 'stun:stun1.l.google.com:19302' }] }
+                    });
+
+                    peer.on('open', () => {
+                        durumGuncelle("ODAYA BAĞLANILDI! SES AKTİF.", "status-connected");
+                        surusModu(true);
+                        // Odadaki diğer kişiyi otomatik ara
+                        currentCall = peer.call(ODA_1, localStream);
+                        currentCall.on('stream', rStream => {
+                            document.getElementById('remote-audio').srcObject = rStream;
+                        });
+                        currentCall.on('close', () => { odadanAyril(); });
+                    });
+                } else {
+                    durumGuncelle("BAĞLANTI HATASI!", "status-error");
+                    joinBtn.disabled = false;
+                }
+            });
+
+            // Eğer biz içerideyken arkadaşımız odaya gelirse (bizi ararsa) otomatik cevapla
+            peer.on('call', call => {
+                currentCall = call;
+                durumGuncelle("BAĞLANTI AKTİF! KEYİFLİ SÜRÜŞLER.", "status-connected");
+                call.answer(localStream);
+                call.on('stream', rStream => {
+                    document.getElementById('remote-audio').srcObject = rStream;
+                });
+                call.on('close', () => { odadanAyril(); });
+            });
+        }
 
         function surusModu(aktif) {
-            setupControls.style.display = aktif ? "none" : "block";
-            idPanel.style.display = aktif ? "none" : "block";
+            roomPanel.style.display = aktif ? "none" : "block";
             muteBtn.style.display = aktif ? "block" : "none";
             disconnectBtn.style.display = aktif ? "block" : "none";
             if(!aktif) {
+                joinBtn.disabled = false;
                 isMuted = false;
                 muteBtn.innerText = "🎤 MİKROFONU SUSTUR";
                 muteBtn.className = "btn btn-mute";
@@ -104,31 +152,12 @@
             }
         }
 
-        peer.on('call', call => {
-            currentCall = call; durumGuncelle("BAĞLANTI AKTİF", "status-connected"); surusModu(true);
-            call.answer(localStream);
-            call.on('stream', rStream => { document.getElementById('remote-audio').srcObject = rStream; });
-            call.on('close', () => { baglantiyiKes(); });
-        });
-
-        function arkadasiAra() {
-            const id = document.getElementById('peer-id').value;
-            if(!id) return alert("Lütfen kod girin!");
-            durumGuncelle("ARANIYOR...", "status-ready");
-            currentCall = peer.call(id, localStream);
-            currentCall.on('stream', rStream => {
-                durumGuncelle("BAĞLANTI AKTİF", "status-connected"); surusModu(true);
-                document.getElementById('remote-audio').srcObject = rStream;
-            });
-            currentCall.on('close', () => { baglantiyiKes(); });
-        }
-
         function sesiSustur() {
             if(!localStream) return;
             isMuted = !isMuted;
             localStream.getAudioTracks()[0].enabled = !isMuted; 
             if(isMuted) {
-                muteBtn.innerText = "🔇 MİKROFON KAPALI (SESİN GİTMİYOR)";
+                muteBtn.innerText = "重新 MİKROFON KAPALI (SESİN GİTMİYOR)";
                 muteBtn.className = "btn btn-mute btn-muted";
             } else {
                 muteBtn.innerText = "🎤 MİKROFONU SUSTUR";
@@ -136,17 +165,12 @@
             }
         }
 
-        function baglantiyiKes() {
+        function odadanAyril() {
             if(currentCall) { currentCall.close(); currentCall = null; }
+            if(peer) { peer.destroy(); peer = null; }
             document.getElementById('remote-audio').srcObject = null;
-            durumGuncelle("BAĞLANTIYA HAZIR", "status-ready");
+            durumGuncelle("ODAYA GİRMEYE HAZIR", "status-ready");
             surusModu(false);
-        }
-
-        function kodKopyala() {
-            const idText = document.getElementById('my-id').innerText;
-            if(idText === "....") return;
-            navigator.clipboard.writeText(idText).then(() => { alert("Kod kopyalandı!"); });
         }
     </script>
 </body>
