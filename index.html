@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#121212">
+    <meta name="description" content="Motorda arkadaşınızla sesli bağlantı ve GPS paylaşımı için web uygulaması.">
     <title>RideCom OS v12 Pro</title>
+    <link rel="manifest" href="./manifest.json">
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -53,6 +56,8 @@
         .btn-muted { background: #d32f2f; color: white; }
 
         .room-section { background: #1e1e1e; padding: 15px; border-radius: 12px; text-align: center; }
+        .button-row { display: flex; gap: 8px; }
+        .button-row .btn { flex: 1; }
         .btn { width: 100%; padding: 18px; font-size: 16px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
         .btn:active { transform: scale(0.98); }
         .btn-join { background: #ff9800; color: #121212; margin-top: 10px; }
@@ -96,8 +101,12 @@
 
     <div class="room-section" id="room-panel">
         <input type="text" id="rider-name" placeholder="Sürücü Adınız">
+        <input type="text" id="room-code" placeholder="Oda Kodu (örn. ride42)">
         <input type="number" id="speed-limit" placeholder="Radar Limiti (Opsiyonel)">
-        <button class="btn btn-join" id="btn-join" onclick="sistemiBaslat()">Yolculuğu Başlat</button>
+        <div class="button-row">
+            <button class="btn btn-join" id="btn-create" onclick="odaOlustur()">ODA OLUŞTUR</button>
+            <button class="btn btn-join" id="btn-join" onclick="odayaKatil()">ODAYA KATIL</button>
+        </div>
     </div>
 
     <div id="ride-controls">
@@ -109,17 +118,12 @@
     <audio id="remote-audio-2" autoplay playsinline></audio>
 
     <script>
-        // Global State & Core Variables
         let localStream = null, isMuted = false, peer = null, audioCtx = null;
-        let myName = "", myRole = "", groupUsers = {}, currentSpeed = 0, speedLimit = 0;
-        let map = null, myMarker = null, peerMarkers = {};
-        
-        // Memory Leak Prevention Identifiers
+        let myName = "", roomCode = "", myPeerId = "", remotePeerId = "";
+        let currentSpeed = 0, speedLimit = 0;
+        let map = null, myMarker = null, remoteMarker = null;
         let dimmerTimeout = null, vuInterval = null, syncInterval = null, gpsWatchId = null, filterHoldTimeout = null;
-        
-        const d = new Date();
-        const zamanDamgasi = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate() + "-" + d.getHours();
-        const ROLLER = ["room-r1-" + zamanDamgasi, "room-r2-" + zamanDamgasi, "room-r3-" + zamanDamgasi];
+        let remoteUser = null, remoteConn = null;
 
         const DOM = {
             status: document.getElementById('status-box'),
@@ -128,41 +132,13 @@
             roomPanel: document.getElementById('room-panel'),
             userList: document.getElementById('user-list'),
             dimmer: document.getElementById('dimmer-layer'),
+            createBtn: document.getElementById('btn-create'),
             joinBtn: document.getElementById('btn-join')
         };
 
-        function durumGuncelle(mesaj, tip) { DOM.status.innerText = mesaj; DOM.status.className = "status-panel " + tip; }
-
-        // 1. Initial Mic Request (Page Load)
-        navigator.mediaDevices.getUserMedia({ 
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false 
-        }).then(stream => {
-            localStream = stream;
-            durumGuncelle("MİKROFON HAZIR, BEKLENİYOR", "status-ready");
-        }).catch(() => durumGuncelle("MIKROFON İZNİ REDDEDİLDİ!", "status-error"));
-
-        // 2. iOS AudioContext Fix: Init on User Interaction
-        function sistemiBaslat() {
-            myName = document.getElementById('rider-name').value.trim();
-            speedLimit = parseInt(document.getElementById('speed-limit').value) || 0;
-            
-            if(!myName) return alert("Lütfen adınızı yazın!");
-            if(!localStream) return alert("Mikrofon erişimi sağlanamadı!");
-
-            DOM.joinBtn.disabled = true;
-            durumGuncelle("SİSTEMLER BAŞLATILIYOR...", "status-ready");
-
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-
-            setupVUMeter(localStream);
-            setupGPSAndMap();
-            setupMediaSession();
-            tryConnect(0);
+        function durumGuncelle(mesaj, tip) {
+            DOM.status.innerText = mesaj;
+            DOM.status.className = "status-panel " + tip;
         }
 
         function ayarlariAcKapat() {
@@ -173,197 +149,301 @@
         function toggleFeature(elementId, isVisible) {
             let el = document.getElementById(elementId);
             el.style.display = isVisible ? "block" : "none";
-            if(elementId === "map-container" && isVisible && map) { setTimeout(() => map.invalidateSize(), 200); }
-        }
-
-        function hudGuncelle() {
-            DOM.userList.innerHTML = "";
-            let li = document.createElement('li'); li.className = "user-item";
-            li.innerHTML = `<span>👤 ${myName} (Sen)</span> <span class="user-status ${isMuted ? 'btn-muted' : 'status-speaking'}">${isMuted ? 'MUTED' : 'KONUŞUYOR'}<div class="vu-meter"><div class="vu-bar" id="my-vu"></div></div></span>`;
-            DOM.userList.appendChild(li);
-
-            ROLLER.forEach((role, idx) => {
-                if(role !== myRole) {
-                    let u = groupUsers[role];
-                    let liX = document.createElement('li'); liX.className = "user-item";
-                    liX.innerHTML = `<span>🏍️ ${u ? u.name : 'Sürücü ' + (idx+1)}</span> <span class="user-status ${u ? (u.muted ? 'btn-muted' : 'status-speaking') : 'status-offline'}">${u ? (u.muted ? 'MUTED' : 'BAĞLI') : 'GELMEDİ'}</span>`;
-                    DOM.userList.appendChild(liX);
-                }
-            });
-        }
-
-        function tryConnect(roleIdx) {
-            if(roleIdx >= ROLLER.length) { 
-                durumGuncelle("ODA DOLU!", "status-error"); 
-                DOM.joinBtn.disabled = false;
-                return; 
+            if(elementId === "map-container" && isVisible && map) {
+                setTimeout(() => map.invalidateSize(), 200);
             }
-            
-            myRole = ROLLER[roleIdx];
-            peer = new Peer(myRole, { config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] } });
+        }
+
+        function sanitizeRoomCode(value) {
+            return String(value || '').trim().toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 20);
+        }
+
+        function generateRoomCode() {
+            return 'ride' + Math.floor(1000 + Math.random() * 9000);
+        }
+
+        async function ensureMicrophoneReady() {
+            if (localStream) return true;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    video: false
+                });
+                localStream = stream;
+                durumGuncelle("MİKROFON HAZIR. BAĞLANTIYI BAŞLATIN.", "status-ready");
+                return true;
+            } catch (err) {
+                console.error(err);
+                durumGuncelle("MİKROFON İZNİ REDDEDİLDİ!", "status-error");
+                return false;
+            }
+        }
+
+        async function odaOlustur() {
+            myName = document.getElementById('rider-name').value.trim();
+            speedLimit = parseInt(document.getElementById('speed-limit').value) || 0;
+            roomCode = sanitizeRoomCode(document.getElementById('room-code').value) || generateRoomCode();
+
+            if (!myName) return alert("Lütfen adınızı yazın!");
+            if (!await ensureMicrophoneReady()) return;
+
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
+            setupVUMeter(localStream);
+            setupGPSAndMap();
+            setupMediaSession();
+            startPeer(`${roomCode}-host`, 'host');
+        }
+
+        async function odayaKatil() {
+            myName = document.getElementById('rider-name').value.trim();
+            speedLimit = parseInt(document.getElementById('speed-limit').value) || 0;
+            roomCode = sanitizeRoomCode(document.getElementById('room-code').value);
+
+            if (!myName) return alert("Lütfen adınızı yazın!");
+            if (!roomCode) return alert("Oda kodu girin!");
+            if (!await ensureMicrophoneReady()) return;
+
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
+            setupVUMeter(localStream);
+            setupGPSAndMap();
+            setupMediaSession();
+            startPeer(`${roomCode}-guest`, 'guest', `${roomCode}-host`);
+        }
+
+        function startPeer(peerId, mode, targetPeerId = "") {
+            if (peer) peer.destroy();
+
+            myPeerId = peerId;
+            [DOM.createBtn, DOM.joinBtn].forEach(btn => btn && (btn.disabled = true));
+            durumGuncelle(mode === 'host' ? "ODA HAZIRLANIYOR..." : "BAĞLANIYOR...", "status-ready");
+
+            peer = new Peer(peerId, {
+                host: '0.peerjs.com',
+                port: 443,
+                secure: true,
+                config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+            });
 
             peer.on('open', () => {
-                durumGuncelle("GRUP ODASINDASIN", "status-ready");
-                surusModu(true); hudGuncelle();
+                surusModu(true);
+                hudGuncelle();
                 pilTasarrufuZamanlayiciBaslat();
-                
-                ROLLER.forEach(targetRole => {
-                    if(targetRole !== myRole) {
-                        peer.call(targetRole, localStream);
-                        peer.connect(targetRole);
-                    }
-                });
+
+                if (mode === 'host') {
+                    durumGuncelle(`ODA HAZIR. KOD: ${roomCode}`, "status-ready");
+                } else {
+                    connectToPeer(targetPeerId);
+                    durumGuncelle("ARKADAŞINIZA BAĞLANILIYOR...", "status-ready");
+                }
             });
 
-            peer.on('error', (err) => { if (err.type === 'unavailable-id') { peer.destroy(); tryConnect(roleIdx + 1); } });
-            peer.on('call', call => { call.answer(localStream); handleCall(call, call.peer); });
-            peer.on('connection', conn => { handleData(conn, conn.peer); });
-            
-            // Reconnection resilience
+            peer.on('call', call => {
+                call.answer(localStream);
+                handleIncomingCall(call);
+            });
+
+            peer.on('connection', conn => {
+                setupDataConnection(conn);
+            });
+
+            peer.on('error', err => {
+                console.error(err);
+                durumGuncelle("BAĞLANTI HATASI", "status-error");
+                [DOM.createBtn, DOM.joinBtn].forEach(btn => btn && (btn.disabled = false));
+            });
+
             peer.on('disconnected', () => {
                 durumGuncelle("AĞ KOPTU, YENİDEN BAĞLANILIYOR...", "status-error");
                 peer.reconnect();
             });
         }
 
-        function handleCall(call, roleId) {
-            call.on('stream', rStream => {
-                let slot = (roleId === ROLLER[0] || (roleId === ROLLER[1] && myRole === ROLLER[2])) ? "1" : "2";
-                let audioEl = document.getElementById('remote-audio-' + slot);
-                audioEl.srcObject = rStream;
-                if(!groupUsers[roleId]) groupUsers[roleId] = { name: "Bağlanıyor...", muted: false };
-                hudGuncelle();
+        function connectToPeer(targetPeerId) {
+            const conn = peer.connect(targetPeerId);
+            setupDataConnection(conn);
+            const call = peer.call(targetPeerId, localStream);
+            handleIncomingCall(call);
+        }
+
+        function handleIncomingCall(call) {
+            call.on('stream', stream => {
+                const audioEl = document.getElementById('remote-audio-1');
+                if (audioEl) {
+                    audioEl.srcObject = stream;
+                    audioEl.play().catch(() => {});
+                }
+                durumGuncelle("SES BAĞLANTISI AKTİF", "status-connected");
             });
         }
 
-        function handleData(conn, roleId) {
-            conn.on('open', () => { 
-                sendSync(conn); 
-                syncInterval = setInterval(() => sendSync(conn), 3000); 
+        function setupDataConnection(conn) {
+            remoteConn = conn;
+            remotePeerId = conn.peer;
+
+            conn.on('open', () => {
+                sendSync();
+                syncInterval = setInterval(sendSync, 3000);
             });
+
             conn.on('data', data => {
-                if(data.type === 'sync') {
-                    groupUsers[roleId] = { name: data.name, muted: data.muted, lat: data.lat, lng: data.lng };
-                    durumGuncelle("GRUP AKTİF", "status-connected");
+                if (data.type === 'sync') {
+                    remoteUser = { name: data.name, muted: data.muted, lat: data.lat, lng: data.lng };
+                    durumGuncelle("BAĞLANTI AKTİF", "status-connected");
                     hudGuncelle();
                     updateMapMarkers();
                 }
             });
-            conn.on('close', () => clearInterval(syncInterval));
+
+            conn.on('close', () => {
+                clearInterval(syncInterval);
+                remoteUser = null;
+                hudGuncelle();
+                updateMapMarkers();
+                durumGuncelle("ARKADAŞ AYRILDI", "status-error");
+            });
         }
 
-        function sendSync(conn) {
-            if(conn && conn.open) {
-                let loc = myMarker ? myMarker.getLatLng() : {lat: null, lng: null};
-                conn.send({ type: 'sync', name: myName, muted: isMuted, lat: loc.lat, lng: loc.lng });
+        function sendSync() {
+            if (remoteConn && remoteConn.open) {
+                const loc = myMarker ? myMarker.getLatLng() : { lat: null, lng: null };
+                remoteConn.send({ type: 'sync', name: myName, muted: isMuted, lat: loc.lat, lng: loc.lng });
             }
         }
 
-        // Optimized Anti-Flutter Noise Gate
+        function hudGuncelle() {
+            DOM.userList.innerHTML = "";
+
+            const liMe = document.createElement('li');
+            liMe.className = 'user-item';
+            liMe.innerHTML = `<span>👤 ${myName || 'Sen'} (Sen)</span> <span class="user-status ${isMuted ? 'btn-muted' : 'status-speaking'}">${isMuted ? 'MUTED' : 'KONUŞUYOR'}<div class="vu-meter"><div class="vu-bar" id="my-vu"></div></div></span>`;
+            DOM.userList.appendChild(liMe);
+
+            if (remoteUser) {
+                const liRemote = document.createElement('li');
+                liRemote.className = 'user-item';
+                liRemote.innerHTML = `<span>🏍️ ${remoteUser.name || 'Arkadaş'}</span> <span class="user-status ${remoteUser.muted ? 'btn-muted' : 'status-speaking'}">${remoteUser.muted ? 'MUTED' : 'BAĞLI'}</span>`;
+                DOM.userList.appendChild(liRemote);
+            } else {
+                const liEmpty = document.createElement('li');
+                liEmpty.className = 'user-item';
+                liEmpty.innerHTML = '<span>⏳ Bağlantı bekleniyor</span><span class="user-status status-offline">BEKLEMEDE</span>';
+                DOM.userList.appendChild(liEmpty);
+            }
+        }
+
         function setupVUMeter(stream) {
-            if(vuInterval) clearInterval(vuInterval);
-            
-            let analyser = audioCtx.createAnalyser();
-            let source = audioCtx.createMediaStreamSource(stream);
-            source.connect(analyser); analyser.fftSize = 64;
-            let dataArray = new Uint8Array(analyser.frequencyBinCount);
-            
+            if (vuInterval) clearInterval(vuInterval);
+
+            const analyser = audioCtx.createAnalyser();
+            const source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            analyser.fftSize = 64;
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
             vuInterval = setInterval(() => {
                 if (!isMuted && peer && !peer.destroyed) {
                     analyser.getByteFrequencyData(dataArray);
-                    let total = 0; for (let i = 0; i < dataArray.length; i++) total += dataArray[i];
+                    let total = 0;
+                    for (let i = 0; i < dataArray.length; i++) total += dataArray[i];
                     let volume = (total / dataArray.length) * 3;
-                    
-                    if(document.getElementById('cfg-filter').checked) {
-                        if(volume > 12) {
+
+                    if (document.getElementById('cfg-filter').checked) {
+                        if (volume > 12) {
                             localStream.getAudioTracks()[0].enabled = true;
                             clearTimeout(filterHoldTimeout);
                             filterHoldTimeout = setTimeout(() => {
-                                if(!isMuted) localStream.getAudioTracks()[0].enabled = false;
-                            }, 1500); // 1.5 saniyelik Hold (Yumuşak kapanış)
+                                if (!isMuted) localStream.getAudioTracks()[0].enabled = false;
+                            }, 1500);
                         }
-                    } else if(!isMuted) {
+                    } else if (!isMuted) {
                         localStream.getAudioTracks()[0].enabled = true;
                     }
 
-                    let bar = document.getElementById('my-vu');
-                    if(bar) bar.style.width = Math.min(volume, 100) + "%";
+                    const bar = document.getElementById('my-vu');
+                    if (bar) bar.style.width = Math.min(volume, 100) + '%';
                 }
             }, 100);
         }
 
         function setupGPSAndMap() {
-    if(!map) {
-        map = L.map('map-container').setView([41.0082, 28.9784], 15);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
-    }
-
-    if (!navigator.geolocation) {
-        document.getElementById('speed-display').innerText = "X";
-        document.querySelector('.speed-unit').innerText = "GPS Yok";
-        return;
-    }
-    
-    if(gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
-    
-    // GPS tetikleyicisi (Timeout eklendi)
-    gpsWatchId = navigator.geolocation.watchPosition(position => {
-        let lat = position.coords.latitude;
-        let lng = position.coords.longitude;
-        let speed = position.coords.speed;
-
-        if (!myMarker) {
-            myMarker = L.marker([lat, lng]).addTo(map).bindPopup("Sen");
-        } else {
-            myMarker.setLatLng([lat, lng]);
-        }
-        
-        if(document.getElementById('cfg-map').checked) map.panTo([lat, lng]);
-
-        // Hız sadece 0'dan büyükse ve null değilse güncelle (Yürürken veya motordayken)
-        if (speed !== null) {
-            currentSpeed = Math.round(speed * 3.6);
-            document.getElementById('speed-display').innerText = currentSpeed;
-            
-            let gpsPanel = document.getElementById('gps-panel');
-            if(speedLimit > 0 && currentSpeed > speedLimit) { gpsPanel.className = "gps-hud radar-warning"; } 
-            else { gpsPanel.className = "gps-hud"; }
-
-            if(document.getElementById('cfg-autovol').checked) {
-                let volFactor = currentSpeed > 80 ? 1.0 : (currentSpeed > 40 ? 0.8 : 0.6);
-                ["remote-audio-1", "remote-audio-2"].forEach(id => {
-                    let el = document.getElementById(id); if(el) el.volume = volFactor;
-                });
+            if (!map) {
+                map = L.map('map-container').setView([41.0082, 28.9784], 15);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
             }
-        }
-    }, 
-    (err) => {
-        // [YENİ] Hata Yakalayıcı: GPS neden çalışmıyor ekrana basar!
-        let hataMesaji = "Hata";
-        if(err.code === 1) hataMesaji = "İzin Yok";
-        if(err.code === 2) hataMesaji = "Sinyal Yok";
-        if(err.code === 3) hataMesaji = "Zaman Aşımı";
-        
-        document.getElementById('speed-display').innerText = "!";
-        document.querySelector('.speed-unit').innerText = hataMesaji;
-        console.warn("GPS Hatası: ", err.message);
-    }, 
-    // Tarayıcının takılı kalmaması için maksimum bekleme süresi eklendi
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }); 
-}
 
-        function updateMapMarkers() {
-            if(!map) return;
-            Object.keys(groupUsers).forEach(roleId => {
-                let u = groupUsers[roleId];
-                if(u.lat && u.lng) {
-                    if(!peerMarkers[roleId]) {
-                        peerMarkers[roleId] = L.marker([u.lat, u.lng]).addTo(map).bindPopup(u.name);
+            if (!navigator.geolocation) {
+                document.getElementById('speed-display').innerText = 'X';
+                document.querySelector('.speed-unit').innerText = 'GPS Yok';
+                return;
+            }
+
+            if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+
+            gpsWatchId = navigator.geolocation.watchPosition(position => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const speed = position.coords.speed;
+
+                if (!myMarker) {
+                    myMarker = L.marker([lat, lng]).addTo(map).bindPopup('Sen');
+                } else {
+                    myMarker.setLatLng([lat, lng]);
+                }
+
+                if (document.getElementById('cfg-map').checked) map.panTo([lat, lng]);
+
+                if (speed !== null) {
+                    currentSpeed = Math.round(speed * 3.6);
+                    document.getElementById('speed-display').innerText = currentSpeed;
+
+                    const gpsPanel = document.getElementById('gps-panel');
+                    if (speedLimit > 0 && currentSpeed > speedLimit) {
+                        gpsPanel.className = 'gps-hud radar-warning';
                     } else {
-                        peerMarkers[roleId].setLatLng([u.lat, u.lng]);
+                        gpsPanel.className = 'gps-hud';
+                    }
+
+                    if (document.getElementById('cfg-autovol').checked) {
+                        const volFactor = currentSpeed > 80 ? 1.0 : (currentSpeed > 40 ? 0.8 : 0.6);
+                        ['remote-audio-1', 'remote-audio-2'].forEach(id => {
+                            const el = document.getElementById(id);
+                            if (el) el.volume = volFactor;
+                        });
                     }
                 }
-            });
+            }, err => {
+                let hataMesaji = 'Hata';
+                if (err.code === 1) hataMesaji = 'İzin Yok';
+                if (err.code === 2) hataMesaji = 'Sinyal Yok';
+                if (err.code === 3) hataMesaji = 'Zaman Aşımı';
+
+                document.getElementById('speed-display').innerText = '!';
+                document.querySelector('.speed-unit').innerText = hataMesaji;
+                console.warn('GPS Hatası:', err.message);
+            }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        }
+
+        function updateMapMarkers() {
+            if (!map) return;
+            if (remoteUser && remoteUser.lat && remoteUser.lng) {
+                if (!remoteMarker) {
+                    remoteMarker = L.marker([remoteUser.lat, remoteUser.lng]).addTo(map).bindPopup(remoteUser.name || 'Arkadaş');
+                } else {
+                    remoteMarker.setLatLng([remoteUser.lat, remoteUser.lng]);
+                }
+            }
         }
 
         function setupMediaSession() {
@@ -375,59 +455,72 @@
 
         function pilTasarrufuZamanlayiciBaslat() {
             clearTimeout(dimmerTimeout);
-            if(!document.getElementById('cfg-battery').checked) return;
-            dimmerTimeout = setTimeout(() => { if(peer) DOM.dimmer.style.display = "flex"; }, 15000);
+            if (!document.getElementById('cfg-battery').checked) return;
+            dimmerTimeout = setTimeout(() => {
+                if (peer) DOM.dimmer.style.display = 'flex';
+            }, 15000);
         }
 
-        function ekraniUyandir() { DOM.dimmer.style.display = "none"; pilTasarrufuZamanlayiciBaslat(); }
-        
+        function ekraniUyandir() {
+            DOM.dimmer.style.display = 'none';
+            pilTasarrufuZamanlayiciBaslat();
+        }
+
         function surusModu(aktif) {
-            DOM.roomPanel.style.display = aktif ? "none" : "block";
-            DOM.muteBtn.style.display = aktif ? "block" : "none";
-            DOM.discBtn.style.display = aktif ? "block" : "none";
+            DOM.roomPanel.style.display = aktif ? 'none' : 'block';
+            DOM.muteBtn.style.display = aktif ? 'block' : 'none';
+            DOM.discBtn.style.display = aktif ? 'block' : 'none';
             toggleFeature('gps-panel', document.getElementById('cfg-gps').checked && aktif);
             toggleFeature('map-container', document.getElementById('cfg-map').checked && aktif);
-            
-            if(!aktif) { 
-                isMuted = false; 
-                groupUsers = {}; 
-                hudGuncelle(); 
-                DOM.joinBtn.disabled = false;
+
+            if (!aktif) {
+                isMuted = false;
+                remoteUser = null;
+                remoteConn = null;
+                remotePeerId = '';
+                hudGuncelle();
+                [DOM.createBtn, DOM.joinBtn].forEach(btn => btn && (btn.disabled = false));
             }
         }
 
         function sesiSustur() {
-            if(!localStream) return;
+            if (!localStream) return;
             isMuted = !isMuted;
-            
-            // Eğer rüzgar filtresi açıksa ve sessize aldıysak kilitlenmesini önle
-            if(isMuted) clearTimeout(filterHoldTimeout);
-            
-            localStream.getAudioTracks()[0].enabled = !isMuted; 
-            DOM.muteBtn.innerText = isMuted ? "🔇 SESİN GİTMİYOR" : "🎤 MİKROFONU SUSTUR";
-            DOM.muteBtn.className = isMuted ? "btn btn-mute btn-muted" : "btn btn-mute";
-            hudGuncelle(); pilTasarrufuZamanlayiciBaslat();
+
+            if (isMuted) clearTimeout(filterHoldTimeout);
+
+            localStream.getAudioTracks()[0].enabled = !isMuted;
+            DOM.muteBtn.innerText = isMuted ? '🔇 SESİN GİTMİYOR' : '🎤 MİKROFONU SUSTUR';
+            DOM.muteBtn.className = isMuted ? 'btn btn-mute btn-muted' : 'btn btn-mute';
+            hudGuncelle();
+            pilTasarrufuZamanlayiciBaslat();
         }
 
-        // Garbage Collection & Full Reset
         function odadanAyril() {
-            // Bellekleri temizle
             clearInterval(vuInterval);
             clearInterval(syncInterval);
             clearTimeout(dimmerTimeout);
             clearTimeout(filterHoldTimeout);
-            if(gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
-            
-            if(peer) peer.destroy();
-            
+            if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+
+            if (peer) peer.destroy();
+
             document.getElementById('remote-audio-1').srcObject = null;
             document.getElementById('remote-audio-2').srcObject = null;
-            
-            durumGuncelle("ODADAN AYRILDINIZ", "status-ready");
+
+            durumGuncelle('ODADAN AYRILDINIZ', 'status-ready');
             surusModu(false);
         }
-        
-        document.body.addEventListener('click', () => { if(peer) pilTasarrufuZamanlayiciBaslat(); });
+
+        document.body.addEventListener('click', () => {
+            if (peer) pilTasarrufuZamanlayiciBaslat();
+        });
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(() => {});
+            });
+        }
     </script>
 </body>
 </html>
