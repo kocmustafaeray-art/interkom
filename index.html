@@ -2,8 +2,11 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#121212">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="description" content="Motorda arkadaşınızla sesli bağlantı ve GPS paylaşımı için web uygulaması.">
     <title>RideCom OS v12 Pro</title>
     <link rel="manifest" href="./manifest.json">
@@ -11,8 +14,8 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; display: flex; flex-direction: column; justify-content: space-between; min-height: 100vh; padding: 15px; overflow-x: hidden; }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; display: flex; flex-direction: column; justify-content: space-between; min-height: 100vh; padding: 15px; padding-top: calc(15px + env(safe-area-inset-top)); padding-bottom: calc(15px + env(safe-area-inset-bottom)); overflow-x: hidden; overscroll-behavior: none; touch-action: manipulation; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .header h1 { font-size: 20px; color: #ff9800; letter-spacing: 1px; }
         
@@ -58,15 +61,22 @@
         .room-section { background: #1e1e1e; padding: 15px; border-radius: 12px; text-align: center; }
         .button-row { display: flex; gap: 8px; }
         .button-row .btn { flex: 1; }
-        .btn { width: 100%; padding: 18px; font-size: 16px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
+        .btn { width: 100%; padding: 18px; min-height: 50px; font-size: 16px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
         .btn:active { transform: scale(0.98); }
         .btn-join { background: #ff9800; color: #121212; margin-top: 10px; }
         .btn-mute { background: #0288d1; color: white; display: none; }
         .btn-disconnect { background: #b71c1c; color: white; display: none; }
         
-        input { width: 100%; padding: 12px; font-size: 15px; background: #2d2d2d; border: 2px solid #444; color: white; border-radius: 8px; text-align: center; outline: none; margin-bottom: 8px; transition: border-color 0.2s; }
+        input { width: 100%; padding: 12px; font-size: 15px; background: #2d2d2d; border: 2px solid #444; color: white; border-radius: 8px; text-align: center; outline: none; margin-bottom: 8px; transition: border-color 0.2s; min-height: 46px; }
         input:focus { border-color: #ff9800; }
-        #dimmer-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; display: none; z-index: 9999; justify-content: center; align-items: center; color: #444; font-size: 13px; }
+        #dimmer-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; display: none; z-index: 9999; justify-content: center; align-items: center; color: #444; font-size: 13px; padding: 20px; text-align: center; }
+
+        @media (max-width: 480px) {
+            body { padding: 12px; padding-top: calc(12px + env(safe-area-inset-top)); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+            .header h1 { font-size: 18px; }
+            .speed-val { font-size: 38px; }
+            .btn { padding: 15px; font-size: 15px; }
+        }
     </style>
 </head>
 <body>
