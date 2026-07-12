@@ -293,44 +293,64 @@
         }
 
         function setupGPSAndMap() {
-            if(!map) {
-                map = L.map('map-container').setView([41.0082, 28.9784], 15);
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
-            }
+    if(!map) {
+        map = L.map('map-container').setView([41.0082, 28.9784], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+    }
 
-            if (!navigator.geolocation) return;
-            
-            if(gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
-            
-            gpsWatchId = navigator.geolocation.watchPosition(position => {
-                let lat = position.coords.latitude;
-                let lng = position.coords.longitude;
-                let speed = position.coords.speed;
+    if (!navigator.geolocation) {
+        document.getElementById('speed-display').innerText = "X";
+        document.querySelector('.speed-unit').innerText = "GPS Yok";
+        return;
+    }
+    
+    if(gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+    
+    // GPS tetikleyicisi (Timeout eklendi)
+    gpsWatchId = navigator.geolocation.watchPosition(position => {
+        let lat = position.coords.latitude;
+        let lng = position.coords.longitude;
+        let speed = position.coords.speed;
 
-                if (!myMarker) {
-                    myMarker = L.marker([lat, lng]).addTo(map).bindPopup("Sen");
-                } else {
-                    myMarker.setLatLng([lat, lng]);
-                }
-                if(document.getElementById('cfg-map').checked) map.panTo([lat, lng]);
-
-                if (speed !== null && speed > 0) {
-                    currentSpeed = Math.round(speed * 3.6);
-                    document.getElementById('speed-display').innerText = currentSpeed;
-                    
-                    let gpsPanel = document.getElementById('gps-panel');
-                    if(speedLimit > 0 && currentSpeed > speedLimit) { gpsPanel.className = "gps-hud radar-warning"; } 
-                    else { gpsPanel.className = "gps-hud"; }
-
-                    if(document.getElementById('cfg-autovol').checked) {
-                        let volFactor = currentSpeed > 80 ? 1.0 : (currentSpeed > 40 ? 0.8 : 0.6);
-                        ["remote-audio-1", "remote-audio-2"].forEach(id => {
-                            let el = document.getElementById(id); if(el) el.volume = volFactor;
-                        });
-                    }
-                }
-            }, () => {}, { enableHighAccuracy: true });
+        if (!myMarker) {
+            myMarker = L.marker([lat, lng]).addTo(map).bindPopup("Sen");
+        } else {
+            myMarker.setLatLng([lat, lng]);
         }
+        
+        if(document.getElementById('cfg-map').checked) map.panTo([lat, lng]);
+
+        // Hız sadece 0'dan büyükse ve null değilse güncelle (Yürürken veya motordayken)
+        if (speed !== null) {
+            currentSpeed = Math.round(speed * 3.6);
+            document.getElementById('speed-display').innerText = currentSpeed;
+            
+            let gpsPanel = document.getElementById('gps-panel');
+            if(speedLimit > 0 && currentSpeed > speedLimit) { gpsPanel.className = "gps-hud radar-warning"; } 
+            else { gpsPanel.className = "gps-hud"; }
+
+            if(document.getElementById('cfg-autovol').checked) {
+                let volFactor = currentSpeed > 80 ? 1.0 : (currentSpeed > 40 ? 0.8 : 0.6);
+                ["remote-audio-1", "remote-audio-2"].forEach(id => {
+                    let el = document.getElementById(id); if(el) el.volume = volFactor;
+                });
+            }
+        }
+    }, 
+    (err) => {
+        // [YENİ] Hata Yakalayıcı: GPS neden çalışmıyor ekrana basar!
+        let hataMesaji = "Hata";
+        if(err.code === 1) hataMesaji = "İzin Yok";
+        if(err.code === 2) hataMesaji = "Sinyal Yok";
+        if(err.code === 3) hataMesaji = "Zaman Aşımı";
+        
+        document.getElementById('speed-display').innerText = "!";
+        document.querySelector('.speed-unit').innerText = hataMesaji;
+        console.warn("GPS Hatası: ", err.message);
+    }, 
+    // Tarayıcının takılı kalmaması için maksimum bekleme süresi eklendi
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }); 
+}
 
         function updateMapMarkers() {
             if(!map) return;
