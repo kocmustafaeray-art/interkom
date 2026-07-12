@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RideCom Room v6</title>
+    <title>İnterkom</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,32 +19,26 @@
         .status-connected { border-left-color: #00e676; color: #00e676; animation: pulse 2s infinite; }
         .status-error { border-left-color: #ff1744; color: #ff1744; }
         @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
-        
         .room-section { background: #1e1e1e; padding: 20px; border-radius: 12px; text-align: center; margin: 15px 0; }
-        
         .btn { width: 100%; padding: 22px; font-size: 18px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
-        .btn:active { transform: scale(0.98); }
-        
         .btn-join { background: #ff9800; color: #121212; }
         .btn-mute { background: #0288d1; color: white; display: none; }
         .btn-muted { background: #d32f2f; color: white; animation: pulse 1s infinite; }
         .btn-disconnect { background: #b71c1c; color: white; display: none; }
-        
         .footer { text-align: center; font-size: 11px; color: #444; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1>🏍️ RIDE COM ROOM</h1>
+        <h1>🏍️Yolculuk</h1>
     </div>
 
     <div class="status-panel" id="status-box">Sistem Başlatılıyor...</div>
 
     <div class="room-section" id="room-panel">
         <span style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">BAĞLANILACAK ORTAK ODA</span>
-        <h2 style="color: #ff9800; letter-spacing: 1px;">KASK_INTERKOM_ODASI</h2>
-        
+        <h2 style="color: #ff9800; letter-spacing: 1px;">SÜRÜŞ ODASI ACTIVE</h2>
         <button class="btn btn-join" id="join-btn" style="margin-top: 20px;" onclick="odayaBaglan()">Odaya Gir ve Bağlan</button>
     </div>
 
@@ -53,7 +47,7 @@
         <button class="btn btn-disconnect" id="disconnect-btn" onclick="odadanAyril()">❌ ODADAN AYRIL</button>
     </div>
 
-    <div class="footer">v6.0 - Hazır Oda Modu</div>
+    <div class="footer">v7.0 - Akıllı Eşleşme Paneli</div>
 
     <audio id="remote-audio" autoplay playsinline></audio>
 
@@ -61,9 +55,13 @@
         let localStream, currentCall, isMuted = false;
         let peer = null;
         
-        // İkiniz için tamamen benzersiz ve SABİT ortak oda isimleri
-        const ODA_1 = "kask-interkom-oda-a";
-        const ODA_2 = "kask-interkom-oda-b";
+        // Sunucunun kafası karışmasın diye her saate özel taze oda kodları üretiyoruz
+        const d = new Date();
+        const zamanDamgasi = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate() + "-" + d.getHours();
+        
+        // Cihazların kimlikleri (Biri A diğeri B olacak)
+        const ODA_A = "ride-room-id-a-" + zamanDamgasi;
+        const ODA_B = "ride-room-id-b-" + zamanDamgasi;
         
         const statusBox = document.getElementById('status-box');
         const muteBtn = document.getElementById('mute-btn');
@@ -76,50 +74,46 @@
             statusBox.className = "status-panel " + tip;
         }
 
-        // Mikrofonu ilk açılışta hazırla
         navigator.mediaDevices.getUserMedia({ 
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false 
         }).then(stream => {
             localStream = stream;
             durumGuncelle("ODAYA GİRMEYE HAZIR", "status-ready");
         }).catch(() => {
-            durumGuncelle("MİKROFON İZNİ ALINAMADI!", "status-error");
+            durumGuncelle("MİKROFON İZNİ EKSİK!", "status-error");
         });
 
         function odayaBaglan() {
-            durumGuncelle("ODAYA GİRİLİYOR...", "status-ready");
+            durumGuncelle("BAĞLANTI ARANIYOR...", "status-ready");
             joinBtn.disabled = true;
 
-            // Önce ODA_1 olarak bağlanmayı deniyoruz
-            peer = new Peer(ODA_1, {
+            // Önce A kimliğiyle giriş yapmayı dene
+            peer = new Peer(ODA_A, {
                 config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }, { 'urls': 'stun:stun1.l.google.com:19302' }] }
             });
 
             peer.on('open', () => {
-                // Eğer ODA_1 boşsa, biz "Dinleyici/Sunucu" konumundayız demektir. Arkadaşımızı bekliyoruz.
-                durumGuncelle("ODADA TEK BAŞINASIN. ARKADAŞIN BEKLENİYOR...", "status-ready");
+                // Biz A olarak açıldık, şimdi karşı tarafın (B) girmesini bekliyoruz
+                durumGuncelle("ODADA BEKLENİYOR... ARKADAŞININ BUTONA BASMASINI BEKLE", "status-ready");
                 surusModu(true);
             });
 
             peer.on('error', (err) => {
-                // Eğer ODA_1 zaten doluysa (yani arkadaşın odaya senden önce girdiyse) hata verir.
-                // Bu durumda biz ODA_2 kimliğiyle açılıp, içerideki ODA_1'i otomatik arayacağız.
+                // Eğer A kimliği doluysa (yani PC veya telefon bu kodu kaptıysa) biz B olarak bağlanıp A'yı arıyoruz
                 if (err.type === 'unavailable-id') {
-                    peer.destroy(); // Eski bağlantıyı temizle
+                    peer.destroy();
                     
-                    peer = new Peer(ODA_2, {
+                    peer = new Peer(ODA_B, {
                         config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }, { 'urls': 'stun:stun1.l.google.com:19302' }] }
                     });
 
                     peer.on('open', () => {
-                        durumGuncelle("ODAYA BAĞLANILDI! SES AKTİF.", "status-connected");
+                        durumGuncelle("BAĞLANTI AKTİF!", "status-connected");
                         surusModu(true);
-                        // Odadaki diğer kişiyi otomatik ara
-                        currentCall = peer.call(ODA_1, localStream);
-                        currentCall.on('stream', rStream => {
-                            document.getElementById('remote-audio').srcObject = rStream;
-                        });
-                        currentCall.on('close', () => { odadanAyril(); });
+                        
+                        // Doğrudan A'yı ara
+                        currentCall = peer.call(ODA_A, localStream);
+                        handleCall(currentCall);
                     });
                 } else {
                     durumGuncelle("BAĞLANTI HATASI!", "status-error");
@@ -127,16 +121,26 @@
                 }
             });
 
-            // Eğer biz içerideyken arkadaşımız odaya gelirse (bizi ararsa) otomatik cevapla
+            // Biz içeride beklerken B bize katılırsa burası tetiklenir
             peer.on('call', call => {
                 currentCall = call;
-                durumGuncelle("BAĞLANTI AKTİF! KEYİFLİ SÜRÜŞLER.", "status-connected");
+                durumGuncelle("BAĞLANTI AKTİF!", "status-connected");
+                surusModu(true);
                 call.answer(localStream);
-                call.on('stream', rStream => {
-                    document.getElementById('remote-audio').srcObject = rStream;
-                });
-                call.on('close', () => { odadanAyril(); });
+                handleCall(call);
             });
+        }
+
+        function handleCall(call) {
+            call.on('stream', rStream => {
+                const audio = document.getElementById('remote-audio');
+                audio.srcObject = rStream;
+                // iOS Safari için tetikleyici
+                audio.play().catch(() => {
+                    durumGuncelle("SESİ AÇMAK İÇİN EKRANA DOKUNUN!", "status-connected");
+                });
+            });
+            call.on('close', () => { odadanAyril(); });
         }
 
         function surusModu(aktif) {
@@ -156,13 +160,8 @@
             if(!localStream) return;
             isMuted = !isMuted;
             localStream.getAudioTracks()[0].enabled = !isMuted; 
-            if(isMuted) {
-                muteBtn.innerText = "重新 MİKROFON KAPALI (SESİN GİTMİYOR)";
-                muteBtn.className = "btn btn-mute btn-muted";
-            } else {
-                muteBtn.innerText = "🎤 MİKROFONU SUSTUR";
-                muteBtn.className = "btn btn-mute";
-            }
+            muteBtn.innerText = isMuted ? "🔇 SESİN GİTMİYOR (KAPALI)" : "🎤 MİKROFONU SUSTUR";
+            muteBtn.className = isMuted ? "btn btn-mute btn-muted" : "btn btn-mute";
         }
 
         function odadanAyril() {
