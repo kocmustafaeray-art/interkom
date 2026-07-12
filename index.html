@@ -59,6 +59,18 @@
         .btn-muted { background: #d32f2f; color: white; }
 
         .room-section { background: #1e1e1e; padding: 15px; border-radius: 12px; text-align: center; }
+        .admin-panel { display: none; background: #1e1e1e; border: 2px solid #ff9800; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+        .admin-panel .presence-title { margin-bottom: 8px; }
+        .admin-room { border-top: 1px solid #333; padding-top: 8px; margin-top: 8px; }
+        .admin-room:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+        .admin-room-name { font-weight: bold; color: #ff9800; margin-bottom: 4px; }
+        .admin-room-members { font-size: 12px; color: #bbb; }
+        .presence-panel { background: #232323; border: 1px solid #444; border-radius: 10px; padding: 10px; margin-bottom: 8px; text-align: left; }
+        .presence-title { font-size: 11px; color: #aaa; text-transform: uppercase; margin-bottom: 6px; }
+        .presence-list { display: flex; flex-direction: column; gap: 5px; }
+        .presence-item { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #ddd; padding: 5px 0; border-top: 1px solid #333; }
+        .presence-item:first-child { border-top: none; }
+        .presence-empty { color: #777; font-style: italic; font-size: 12px; }
         .button-row { display: flex; gap: 8px; }
         .button-row .btn { flex: 1; }
         .btn { width: 100%; padding: 18px; min-height: 50px; font-size: 16px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
@@ -104,6 +116,12 @@
 
     <div class="status-panel" id="status-box">Mikrofon izni bekleniyor...</div>
 
+    <div class="admin-panel" id="admin-panel">
+        <div class="presence-title">🛡️ Admin - Açık Odalar</div>
+        <div id="admin-summary">Yönetici modu bekleniyor...</div>
+        <div id="admin-room-list"></div>
+    </div>
+
     <div class="hud-container">
         <span class="hud-title">📊 Grup HUD & Cihazlar</span>
         <ul class="user-list" id="user-list"><li style="color:#666; font-style:italic; font-size:12px; text-align:center;">Giriş bekleniyor.</li></ul>
@@ -113,6 +131,10 @@
         <input type="text" id="rider-name" placeholder="Sürücü Adınız">
         <input type="text" id="room-code" placeholder="Oda Kodu (örn. ride42)">
         <input type="number" id="speed-limit" placeholder="Radar Limiti (Opsiyonel)">
+        <div class="presence-panel" id="presence-panel">
+            <div class="presence-title">👀 Bu odada aktif olanlar</div>
+            <div class="presence-list" id="presence-list">Oda kodunu girip kontrol edin.</div>
+        </div>
         <div class="button-row">
             <button class="btn btn-join" id="btn-create" onclick="odaOlustur()">ODA OLUŞTUR</button>
             <button class="btn btn-join" id="btn-join" onclick="odayaKatil()">ODAYA KATIL</button>
@@ -134,6 +156,19 @@
         let map = null, myMarker = null, remoteMarker = null;
         let dimmerTimeout = null, vuInterval = null, syncInterval = null, gpsWatchId = null, filterHoldTimeout = null;
         let remoteUser = null, remoteConn = null;
+        let roomMembers = [];
+        let currentMode = 'idle';
+        let adminMode = false;
+        let adminConn = null;
+        let adminHeartbeatInterval = null;
+        let adminRooms = [];
+        let adminRegistryChannel = null;
+        const ADMIN_PEER_ID = 'ridecom-admin';
+        const ROOM_REGISTRY_STORAGE_KEY = 'ridecom-admin-room-registry';
+        const ADMIN_USERNAME = 'admin';
+        const ADMIN_PASSWORD = 'ridecom2026';
+        const ADMIN_ALLOWED_IP = ''; // Boş bırakılırsa IP kontrolü yapılmaz. Örnek: '91.12.34.56'
+        const ADMIN_ALLOWED_DEVICE = 'ridecom-admin-device'; // Bu değeri istediğiniz cihaz kimliğiyle değiştirin.
 
         const DOM = {
             status: document.getElementById('status-box'),
@@ -143,7 +178,10 @@
             userList: document.getElementById('user-list'),
             dimmer: document.getElementById('dimmer-layer'),
             createBtn: document.getElementById('btn-create'),
-            joinBtn: document.getElementById('btn-join')
+            joinBtn: document.getElementById('btn-join'),
+            adminPanel: document.getElementById('admin-panel'),
+            adminSummary: document.getElementById('admin-summary'),
+            adminRoomList: document.getElementById('admin-room-list')
         };
 
         function durumGuncelle(mesaj, tip) {
@@ -170,6 +208,258 @@
 
         function generateRoomCode() {
             return 'ride' + Math.floor(1000 + Math.random() * 9000);
+        }
+
+        function isAdminModeEnabled() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('admin') === '1' || params.get('admin') === 'true';
+        }
+
+        function getAdminRequestParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                password: params.get('pass') || params.get('password') || '',
+                username: params.get('user') || params.get('username') || '',
+                device: params.get('device') || '',
+                token: params.get('token') || '',
+                adminKey: params.get('adminKey') || ''
+            };
+        }
+
+        async function verifyAdminAccess() {
+            const params = getAdminRequestParams();
+            const passwordOk = params.password === ADMIN_PASSWORD || params.token === ADMIN_PASSWORD || params.adminKey === ADMIN_ALLOWED_DEVICE;
+            const usernameOk = !ADMIN_USERNAME || params.username === ADMIN_USERNAME || params.username === '' || params.password === ADMIN_PASSWORD || params.token === ADMIN_PASSWORD || params.adminKey === ADMIN_ALLOWED_DEVICE;
+            const deviceOk = !ADMIN_ALLOWED_DEVICE || params.device === ADMIN_ALLOWED_DEVICE || params.password === ADMIN_PASSWORD || params.token === ADMIN_PASSWORD || params.adminKey === ADMIN_ALLOWED_DEVICE;
+
+            if (!passwordOk || !usernameOk || !deviceOk) {
+                return false;
+            }
+
+            if (ADMIN_ALLOWED_IP) {
+                try {
+                    const response = await fetch('https://api.ipify.org?format=json');
+                    const data = await response.json();
+                    return data.ip === ADMIN_ALLOWED_IP;
+                } catch (err) {
+                    console.warn('Admin IP kontrolü başarısız:', err);
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        async function initializeAdminAccess() {
+            if (!isAdminModeEnabled()) return;
+            const allowed = await verifyAdminAccess();
+            if (!allowed) {
+                durumGuncelle('ADMIN GİRİŞİ REDDEDİLDİ. YALNIZCA TANIMLI CİHAZ ERİŞEBİLİR.', 'status-error');
+                return;
+            }
+            startAdminPeer();
+        }
+
+        function renderAdminPanel() {
+            if (!DOM.adminPanel) return;
+            DOM.adminPanel.style.display = adminMode ? 'block' : 'none';
+            if (!adminMode) return;
+            if (!adminRooms.length) {
+                DOM.adminSummary.innerHTML = 'Henüz açık oda yok.';
+                DOM.adminRoomList.innerHTML = '';
+                return;
+            }
+            DOM.adminSummary.innerHTML = `${adminRooms.length} açık oda bulundu.`;
+            DOM.adminRoomList.innerHTML = adminRooms.map(room => `
+                <div class="admin-room">
+                    <div class="admin-room-name">🔹 ${room.roomCode} · ${room.hostName || 'Host'}</div>
+                    <div class="admin-room-members">${(room.members || []).map(member => member.name || 'Üye').join(', ') || 'Üye yok'}</div>
+                </div>
+            `).join('');
+        }
+
+        function initializeAdminRegistrySync() {
+            if (adminRegistryChannel || typeof window === 'undefined') return;
+            if ('BroadcastChannel' in window) {
+                adminRegistryChannel = new BroadcastChannel('ridecom-admin-registry');
+                adminRegistryChannel.onmessage = event => {
+                    if (event.data?.type === 'rooms-update') {
+                        adminRooms = Array.isArray(event.data.rooms) ? event.data.rooms : [];
+                        renderAdminPanel();
+                    }
+                };
+            }
+            window.addEventListener('storage', event => {
+                if (event.key === ROOM_REGISTRY_STORAGE_KEY) {
+                    loadAdminRoomsFromStorage();
+                    renderAdminPanel();
+                }
+            });
+        }
+
+        function persistAdminRoomsToStorage() {
+            try {
+                localStorage.setItem(ROOM_REGISTRY_STORAGE_KEY, JSON.stringify(adminRooms));
+            } catch (err) {
+                console.warn('Admin kayıt depolama hatası:', err);
+            }
+            if (adminRegistryChannel) {
+                adminRegistryChannel.postMessage({ type: 'rooms-update', rooms: adminRooms });
+            }
+        }
+
+        function loadAdminRoomsFromStorage() {
+            try {
+                const stored = localStorage.getItem(ROOM_REGISTRY_STORAGE_KEY);
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    adminRooms = Array.isArray(parsed) ? parsed : [];
+                }
+            } catch (err) {
+                console.warn('Admin kayıt okuma hatası:', err);
+            }
+        }
+
+        function renderPresenceList() {
+            const container = document.getElementById('presence-list');
+            if (!container) return;
+            if (!roomMembers.length) {
+                container.innerHTML = '<div class="presence-empty">Bu odada henüz kimse görünmüyor.</div>';
+                return;
+            }
+            container.innerHTML = roomMembers.map(member => {
+                const roleText = member.role === 'host' ? 'HOST' : 'AKTİF';
+                return `<div class="presence-item"><span>${member.name || 'Kullanıcı'}</span><span class="user-status ${member.role === 'host' ? 'status-speaking' : 'status-connected'}">${roleText}</span></div>`;
+            }).join('');
+        }
+
+        function upsertRoomMember(peerId, name, role = 'guest', connected = true) {
+            const existing = roomMembers.find(member => member.id === peerId);
+            if (existing) {
+                existing.name = name || existing.name || 'Kullanıcı';
+                existing.role = role || existing.role || 'guest';
+                existing.connected = connected;
+            } else {
+                roomMembers.push({ id: peerId, name: name || 'Kullanıcı', role, connected });
+            }
+            roomMembers.sort((a, b) => {
+                if (a.role === 'host') return -1;
+                if (b.role === 'host') return 1;
+                return a.name.localeCompare(b.name, 'tr');
+            });
+            if (currentMode === 'host') syncAdminRoomState();
+        }
+
+        function removeRoomMember(peerId) {
+            roomMembers = roomMembers.filter(member => member.id !== peerId);
+            if (currentMode === 'host') syncAdminRoomState();
+        }
+
+        function registerRoomWithAdmin() {
+            if (!peer || currentMode !== 'host' || adminMode) return;
+            syncAdminRoomState();
+            if (!peer.open || typeof Peer === 'undefined') return;
+            if (adminConn) adminConn.close();
+            adminConn = peer.connect(ADMIN_PEER_ID, { metadata: { purpose: 'room-registry' } });
+
+            adminConn.on('open', () => {
+                adminConn.send({
+                    type: 'room-register',
+                    roomCode,
+                    hostPeerId: myPeerId,
+                    hostName: myName || 'Host',
+                    members: roomMembers,
+                    timestamp: Date.now()
+                });
+                adminHeartbeatInterval = setInterval(() => {
+                    if (adminConn && adminConn.open) {
+                        adminConn.send({ type: 'heartbeat', roomCode, hostPeerId: myPeerId, timestamp: Date.now() });
+                    }
+                }, 5000);
+            });
+
+            adminConn.on('close', () => {
+                clearInterval(adminHeartbeatInterval);
+                adminHeartbeatInterval = null;
+                adminConn = null;
+            });
+
+            adminConn.on('error', () => {
+                clearInterval(adminHeartbeatInterval);
+                adminHeartbeatInterval = null;
+                adminConn = null;
+            });
+        }
+
+        function syncAdminRoomState() {
+            if (!roomCode || currentMode !== 'host') return;
+            const roomEntry = {
+                roomCode,
+                hostPeerId: myPeerId,
+                hostName: myName || 'Host',
+                members: roomMembers,
+                updatedAt: Date.now()
+            };
+            const existingIndex = adminRooms.findIndex(room => room.hostPeerId === roomEntry.hostPeerId || room.roomCode === roomEntry.roomCode);
+            if (existingIndex >= 0) {
+                adminRooms[existingIndex] = roomEntry;
+            } else {
+                adminRooms.push(roomEntry);
+            }
+            adminRooms = adminRooms.filter(room => room.roomCode || room.hostPeerId);
+            adminRooms.sort((a, b) => a.roomCode.localeCompare(b.roomCode, 'tr'));
+            persistAdminRoomsToStorage();
+            renderAdminPanel();
+            if (!adminConn || !adminConn.open) return;
+            adminConn.send({
+                type: 'room-update',
+                roomCode,
+                hostPeerId: myPeerId,
+                hostName: myName || 'Host',
+                members: roomMembers,
+                timestamp: Date.now()
+            });
+        }
+
+        function unregisterRoomFromAdmin() {
+            if (!roomCode || currentMode !== 'host') return;
+            adminRooms = adminRooms.filter(room => room.hostPeerId !== myPeerId && room.roomCode !== roomCode);
+            persistAdminRoomsToStorage();
+            renderAdminPanel();
+            if (!adminConn || !adminConn.open) return;
+            adminConn.send({ type: 'room-unregister', roomCode, hostPeerId: myPeerId, timestamp: Date.now() });
+            adminConn.close();
+        }
+
+        function checkRoomPresence(targetPeerId) {
+            if (!peer || !peer.open || !targetPeerId) return;
+            const previewConn = peer.connect(targetPeerId, { metadata: { purpose: 'presence' } });
+
+            previewConn.on('open', () => {
+                previewConn.send({
+                    type: 'presence-request',
+                    roomCode: roomCode || sanitizeRoomCode(document.getElementById('room-code').value),
+                    requesterName: myName || 'Misafir'
+                });
+            });
+
+            previewConn.on('data', data => {
+                if (data.type === 'presence-response') {
+                    roomMembers = Array.isArray(data.members) ? data.members : [];
+                    renderPresenceList();
+                    if (roomMembers.length > 0) {
+                        durumGuncelle(`ODADA ${roomMembers.length} AKTİF KULLANICI VAR`, 'status-ready');
+                    } else {
+                        durumGuncelle('ODA AKTİF KULLANICI YOK', 'status-ready');
+                    }
+                }
+            });
+
+            previewConn.on('error', () => {
+                roomMembers = [];
+                renderPresenceList();
+                durumGuncelle('ODA BULUNAMADI / HENÜZ AÇIK DEĞİL', 'status-ready');
+            });
         }
 
         async function ensureMicrophoneReady() {
@@ -235,7 +525,10 @@
         function startPeer(peerId, mode, targetPeerId = "") {
             if (peer) peer.destroy();
 
+            currentMode = mode;
             myPeerId = peerId;
+            roomMembers = [];
+            renderPresenceList();
             [DOM.createBtn, DOM.joinBtn].forEach(btn => btn && (btn.disabled = true));
             durumGuncelle(mode === 'host' ? "ODA HAZIRLANIYOR..." : "BAĞLANIYOR...", "status-ready");
 
@@ -252,8 +545,12 @@
                 pilTasarrufuZamanlayiciBaslat();
 
                 if (mode === 'host') {
+                    upsertRoomMember(myPeerId, myName || 'Host', 'host', true);
+                    renderPresenceList();
+                    registerRoomWithAdmin();
                     durumGuncelle(`ODA HAZIR. KOD: ${roomCode}`, "status-ready");
                 } else {
+                    checkRoomPresence(targetPeerId);
                     connectToPeer(targetPeerId);
                     durumGuncelle("ARKADAŞINIZA BAĞLANILIYOR...", "status-ready");
                 }
@@ -265,6 +562,25 @@
             });
 
             peer.on('connection', conn => {
+                if (conn.metadata?.purpose === 'presence') {
+                    conn.on('data', data => {
+                        if (data.type === 'presence-request') {
+                            conn.send({ type: 'presence-response', members: roomMembers });
+                            conn.close();
+                        }
+                    });
+                    return;
+                }
+
+                if (conn.metadata?.purpose === 'room-registry') {
+                    conn.on('data', data => {
+                        if (data.type === 'room-register' || data.type === 'room-update' || data.type === 'heartbeat') {
+                            conn.send({ type: 'registry-ack', ok: true });
+                        }
+                    });
+                    return;
+                }
+
                 setupDataConnection(conn);
             });
 
@@ -303,11 +619,23 @@
             remotePeerId = conn.peer;
 
             conn.on('open', () => {
+                if (currentMode === 'host') {
+                    upsertRoomMember(conn.peer, 'Katılımcı', 'guest', true);
+                    renderPresenceList();
+                } else if (currentMode === 'guest') {
+                    conn.send({ type: 'join-room', name: myName, roomCode });
+                }
                 sendSync();
                 syncInterval = setInterval(sendSync, 3000);
             });
 
             conn.on('data', data => {
+                if (data.type === 'join-room' && currentMode === 'host') {
+                    upsertRoomMember(conn.peer, data.name || 'Katılımcı', 'guest', true);
+                    renderPresenceList();
+                    return;
+                }
+
                 if (data.type === 'sync') {
                     remoteUser = { name: data.name, muted: data.muted, lat: data.lat, lng: data.lng };
                     durumGuncelle("BAĞLANTI AKTİF", "status-connected");
@@ -318,6 +646,13 @@
 
             conn.on('close', () => {
                 clearInterval(syncInterval);
+                if (remoteConn === conn) {
+                    remoteConn = null;
+                }
+                if (currentMode === 'host') {
+                    removeRoomMember(conn.peer);
+                    renderPresenceList();
+                }
                 remoteUser = null;
                 hudGuncelle();
                 updateMapMarkers();
@@ -330,6 +665,84 @@
                 const loc = myMarker ? myMarker.getLatLng() : { lat: null, lng: null };
                 remoteConn.send({ type: 'sync', name: myName, muted: isMuted, lat: loc.lat, lng: loc.lng });
             }
+        }
+
+        function startAdminPeer() {
+            if (peer) peer.destroy();
+            adminMode = true;
+            currentMode = 'admin';
+            myPeerId = ADMIN_PEER_ID;
+            initializeAdminRegistrySync();
+            loadAdminRoomsFromStorage();
+            renderAdminPanel();
+            durumGuncelle('ADMIN MODU AKTİF', 'status-ready');
+
+            if (typeof Peer === 'undefined') {
+                renderAdminPanel();
+                durumGuncelle('ADMIN PANELİ YEREL MODDA HAZIR', 'status-ready');
+                return;
+            }
+
+            peer = new Peer(ADMIN_PEER_ID, {
+                host: '0.peerjs.com',
+                port: 443,
+                secure: true,
+                config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+            });
+
+            peer.on('open', () => {
+                renderAdminPanel();
+                durumGuncelle('ADMIN PANELİ HAZIR', 'status-ready');
+            });
+
+            peer.on('connection', conn => {
+                conn.on('open', () => {
+                    conn.on('data', data => {
+                        if (data.type === 'room-register') {
+                            const roomIndex = adminRooms.findIndex(room => room.hostPeerId === data.hostPeerId || room.roomCode === data.roomCode);
+                            const roomEntry = { roomCode: data.roomCode, hostPeerId: data.hostPeerId, hostName: data.hostName || 'Host', members: Array.isArray(data.members) ? data.members : [], updatedAt: Date.now() };
+                            if (roomIndex >= 0) adminRooms[roomIndex] = roomEntry; else adminRooms.push(roomEntry);
+                            adminRooms.sort((a, b) => a.roomCode.localeCompare(b.roomCode, 'tr'));
+                            persistAdminRoomsToStorage();
+                            renderAdminPanel();
+                            conn.send({ type: 'registry-ack', ok: true });
+                        } else if (data.type === 'room-update') {
+                            const roomIndex = adminRooms.findIndex(room => room.hostPeerId === data.hostPeerId || room.roomCode === data.roomCode);
+                            const roomEntry = { roomCode: data.roomCode, hostPeerId: data.hostPeerId, hostName: data.hostName || 'Host', members: Array.isArray(data.members) ? data.members : [], updatedAt: Date.now() };
+                            if (roomIndex >= 0) adminRooms[roomIndex] = roomEntry; else adminRooms.push(roomEntry);
+                            adminRooms.sort((a, b) => a.roomCode.localeCompare(b.roomCode, 'tr'));
+                            persistAdminRoomsToStorage();
+                            renderAdminPanel();
+                            conn.send({ type: 'registry-ack', ok: true });
+                        } else if (data.type === 'heartbeat') {
+                            const roomIndex = adminRooms.findIndex(room => room.hostPeerId === data.hostPeerId || room.roomCode === data.roomCode);
+                            if (roomIndex >= 0) {
+                                adminRooms[roomIndex].updatedAt = Date.now();
+                                persistAdminRoomsToStorage();
+                                renderAdminPanel();
+                            }
+                            conn.send({ type: 'registry-ack', ok: true });
+                        } else if (data.type === 'room-unregister') {
+                            adminRooms = adminRooms.filter(room => room.hostPeerId !== data.hostPeerId && room.roomCode !== data.roomCode);
+                            persistAdminRoomsToStorage();
+                            renderAdminPanel();
+                            conn.send({ type: 'registry-ack', ok: true });
+                        }
+                    });
+                });
+
+                conn.on('close', () => {
+                    if (adminMode) {
+                        renderAdminPanel();
+                    }
+                });
+            });
+
+            peer.on('error', err => {
+                console.warn('Admin PeerJS hatası, yerel admin modu kullanılacak:', err);
+                renderAdminPanel();
+                durumGuncelle('ADMIN PANELİ YEREL MODDA HAZIR', 'status-ready');
+            });
         }
 
         function hudGuncelle() {
@@ -488,6 +901,8 @@
                 remoteUser = null;
                 remoteConn = null;
                 remotePeerId = '';
+                roomMembers = [];
+                renderPresenceList();
                 hudGuncelle();
                 [DOM.createBtn, DOM.joinBtn].forEach(btn => btn && (btn.disabled = false));
             }
@@ -513,6 +928,10 @@
             clearTimeout(filterHoldTimeout);
             if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
 
+            if (currentMode === 'host') {
+                unregisterRoomFromAdmin();
+            }
+
             if (peer) peer.destroy();
 
             document.getElementById('remote-audio-1').srcObject = null;
@@ -525,6 +944,10 @@
         document.body.addEventListener('click', () => {
             if (peer) pilTasarrufuZamanlayiciBaslat();
         });
+
+        if (isAdminModeEnabled()) {
+            initializeAdminAccess();
+        }
 
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
