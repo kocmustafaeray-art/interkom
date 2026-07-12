@@ -3,82 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>RideCom Ultimate v10</title>
+    <title>RideCom OS v12 Pro</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            font-family: 'Segoe UI', sans-serif; 
-            background: #121212; color: #e0e0e0; 
-            display: flex; flex-direction: column; justify-content: space-between;
-            min-height: 100vh; padding: 20px;
-        }
-        .header h1 { font-size: 24px; color: #ff9800; text-align: center; letter-spacing: 2px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; display: flex; flex-direction: column; justify-content: space-between; min-height: 100vh; padding: 15px; overflow-x: hidden; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .header h1 { font-size: 20px; color: #ff9800; letter-spacing: 1px; }
         
-        /* [YENİ] GPS HIZ KADRANI HUD */
-        .gps-hud { background: #1e1e1e; border-radius: 15px; padding: 15px; text-align: center; margin-bottom: 10px; border: 2px solid #333; }
-        .speed-val { font-size: 58px; font-weight: 900; color: #00e676; display: inline-block; line-height: 1; }
-        .speed-unit { font-size: 14px; color: #888; margin-left: 5px; font-weight: bold; }
-        .radar-warning { border-color: #ff1744 !important; animation: radarBlink 0.5s infinite alternate; }
-        .radar-warning .speed-val { color: #ff1744; }
+        .settings-toggle { background: #333; color: white; border: none; padding: 8px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 13px; transition: background 0.2s; }
+        .settings-toggle:active { background: #555; }
+        
+        .settings-panel { display: none; background: #1e1e1e; border: 2px solid #ff9800; border-radius: 12px; padding: 15px; margin-bottom: 10px; }
+        .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #333; }
+        .setting-row:last-child { border: none; }
+        .switch { position: relative; display: inline-block; width: 45px; height: 25px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; transition: .3s; border-radius: 25px; }
+        .slider:before { position: absolute; content: ""; height: 17px; width: 17px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #ff9800; }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        #gps-panel { background: #1e1e1e; border-radius: 12px; padding: 10px; text-align: center; margin-bottom: 8px; border: 2px solid #333; transition: border-color 0.3s; }
+        .speed-val { font-size: 45px; font-weight: 900; color: #00e676; line-height: 1; }
+        .speed-unit { font-size: 12px; color: #888; margin-left: 3px; }
+        .radar-warning { border-color: #ff1744 !important; animation: radarBlink 0.4s infinite alternate; }
         @keyframes radarBlink { from { background: #1e1e1e; } to { background: #b71c1c; } }
 
-        .status-panel { background: #1e1e1e; border-left: 5px solid #555; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 15px; margin: 10px 0; }
+        #map-container { display: none; height: 180px; border-radius: 12px; margin-bottom: 8px; border: 2px solid #333; z-index: 1; }
+
+        .status-panel { background: #1e1e1e; border-left: 5px solid #555; padding: 10px; border-radius: 6px; text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 8px; transition: border-color 0.3s; }
         .status-ready { border-left-color: #ff9800; color: #ff9800; }
         .status-connected { border-left-color: #00e676; color: #00e676; }
         .status-error { border-left-color: #ff1744; color: #ff1744; }
 
-        .hud-container { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 10px; }
-        .hud-title { font-size: 11px; color: #aaa; text-transform: uppercase; margin-bottom: 8px; display: block; }
+        .hud-container { background: #1e1e1e; padding: 12px; border-radius: 12px; margin-bottom: 8px; }
+        .hud-title { font-size: 11px; color: #aaa; text-transform: uppercase; margin-bottom: 5px; display: block; }
         .user-list { list-style: none; }
-        .user-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #2d2d2d; margin-bottom: 6px; border-radius: 8px; font-weight: bold; font-size: 14px; }
-        .user-status { font-size: 11px; padding: 3px 6px; border-radius: 4px; }
+        .user-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #2d2d2d; margin-bottom: 5px; border-radius: 6px; font-weight: bold; font-size: 13px; }
+        .user-status { font-size: 11px; padding: 2px 5px; border-radius: 4px; }
         
-        .vu-meter { width: 40px; height: 6px; background: #444; border-radius: 3px; display: inline-block; margin-left: 8px; overflow: hidden; vertical-align: middle; }
+        .vu-meter { width: 35px; height: 6px; background: #444; border-radius: 3px; display: inline-block; margin-left: 5px; overflow: hidden; vertical-align: middle; }
         .vu-bar { height: 100%; width: 0%; background: #00e676; transition: width 0.1s; }
 
         .status-offline { background: #555; color: #aaa; }
         .status-speaking { background: #0288d1; color: white; }
         .btn-muted { background: #d32f2f; color: white; }
 
-        .room-section { background: #1e1e1e; padding: 20px; border-radius: 12px; text-align: center; margin: 10px 0; }
-        .btn { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 10px; }
-        .btn-join { background: #ff9800; color: #121212; margin-top: 15px; }
+        .room-section { background: #1e1e1e; padding: 15px; border-radius: 12px; text-align: center; }
+        .btn { width: 100%; padding: 18px; font-size: 16px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
+        .btn:active { transform: scale(0.98); }
+        .btn-join { background: #ff9800; color: #121212; margin-top: 10px; }
         .btn-mute { background: #0288d1; color: white; display: none; }
         .btn-disconnect { background: #b71c1c; color: white; display: none; }
         
-        input { width: 100%; padding: 15px; font-size: 16px; background: #2d2d2d; border: 2px solid #444; color: white; border-radius: 8px; text-align: center; outline: none; margin-bottom: 10px; }
-        #dimmer-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; display: none; z-index: 9999; justify-content: center; align-items: center; color: #444; font-size: 14px; }
-        .footer { text-align: center; font-size: 11px; color: #444; }
+        input { width: 100%; padding: 12px; font-size: 15px; background: #2d2d2d; border: 2px solid #444; color: white; border-radius: 8px; text-align: center; outline: none; margin-bottom: 8px; transition: border-color 0.2s; }
+        input:focus { border-color: #ff9800; }
+        #dimmer-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; display: none; z-index: 9999; justify-content: center; align-items: center; color: #444; font-size: 13px; }
     </style>
 </head>
 <body>
 
-    <div id="dimmer-layer" onclick="ekraniUyandir()">
-        [ Pil Tasarrufu Aktif - Dokun ve Uyandır ]
-    </div>
+    <div id="dimmer-layer" onclick="ekraniUyandir()">[ Pil Tasarrufu Aktif - Dokun ]</div>
 
     <div class="header">
-        <h1>🏍️ RIDE COM ULTIMATE</h1>
+        <h1>🏍️ RIDECOM OS</h1>
+        <button class="settings-toggle" onclick="ayarlariAcKapat()">⚙️ AYARLAR</button>
+    </div>
+
+    <div class="settings-panel" id="settings-panel">
+        <div class="setting-row"><span>GPS Kadranı Göster</span><label class="switch"><input type="checkbox" id="cfg-gps" checked onchange="toggleFeature('gps-panel', this.checked)"><span class="slider"></span></label></div>
+        <div class="setting-row"><span>Grup Haritası Göster</span><label class="switch"><input type="checkbox" id="cfg-map" checked onchange="toggleFeature('map-container', this.checked)"><span class="slider"></span></label></div>
+        <div class="setting-row"><span>Akıllı Rüzgar Filtresi</span><label class="switch"><input type="checkbox" id="cfg-filter" checked><span class="slider"></span></label></div>
+        <div class="setting-row"><span>Hıza Duyarlı Oto-Ses</span><label class="switch"><input type="checkbox" id="cfg-autovol" checked><span class="slider"></span></label></div>
+        <div class="setting-row"><span>Pil Tasarrufu (15sn)</span><label class="switch"><input type="checkbox" id="cfg-battery" checked><span class="slider"></span></label></div>
     </div>
 
     <div class="gps-hud" id="gps-panel">
         <span class="speed-val" id="speed-display">0</span><span class="speed-unit">km/h</span>
     </div>
 
-    <div class="status-panel" id="status-box">Sistem Başlatılıyor...</div>
+    <div id="map-container"></div>
+
+    <div class="status-panel" id="status-box">Mikrofon izni bekleniyor...</div>
 
     <div class="hud-container">
-        <span class="hud-title">📊 Kask HUD Paneli (Grup Modu)</span>
-        <ul class="user-list" id="user-list">
-            <li style="color: #666; font-style: italic; font-size: 13px; text-align: center;" id="no-user-text">Oda başlatılmadı.</li>
-        </ul>
+        <span class="hud-title">📊 Grup HUD & Cihazlar</span>
+        <ul class="user-list" id="user-list"><li style="color:#666; font-style:italic; font-size:12px; text-align:center;">Giriş bekleniyor.</li></ul>
     </div>
 
     <div class="room-section" id="room-panel">
         <input type="text" id="rider-name" placeholder="Sürücü Adınız">
-        <input type="number" id="speed-limit" placeholder="Radar Uyarı Limiti (Örn: 80)" style="font-size:14px; padding:10px;">
-        <button class="btn btn-join" id="join-btn" onclick="odayaBaglan()">Odaya Gir ve Gruba Katıl</button>
+        <input type="number" id="speed-limit" placeholder="Radar Limiti (Opsiyonel)">
+        <button class="btn btn-join" id="btn-join" onclick="sistemiBaslat()">Yolculuğu Başlat</button>
     </div>
 
     <div id="ride-controls">
@@ -86,227 +105,308 @@
         <button class="btn btn-disconnect" id="disconnect-btn" onclick="odadanAyril()">❌ ODADAN AYRIL</button>
     </div>
 
-    <div class="footer">v10.0 - GPS HUD & 3-Way Interkom & Bluetooth Fix</div>
-
     <audio id="remote-audio-1" autoplay playsinline></audio>
     <audio id="remote-audio-2" autoplay playsinline></audio>
 
     <script>
-        let localStream, isMuted = false;
-        let peer = null;
-        let myName = "", myRole = "";
-        let groupUsers = {}; // Odadaki herkesi tutan liste
-        let dimmerTimeout = null, speedLimit = 0;
+        // Global State & Core Variables
+        let localStream = null, isMuted = false, peer = null, audioCtx = null;
+        let myName = "", myRole = "", groupUsers = {}, currentSpeed = 0, speedLimit = 0;
+        let map = null, myMarker = null, peerMarkers = {};
+        
+        // Memory Leak Prevention Identifiers
+        let dimmerTimeout = null, vuInterval = null, syncInterval = null, gpsWatchId = null, filterHoldTimeout = null;
         
         const d = new Date();
         const zamanDamgasi = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate() + "-" + d.getHours();
-        
-        // 3 Benzersiz Rol (Sürücü 1, Sürücü 2, Artçı/Sürücü 3)
-        const ROLLER = [
-            "rider-role-id-a-" + zamanDamgasi,
-            "rider-role-id-b-" + zamanDamgasi,
-            "rider-role-id-c-" + zamanDamgasi
-        ];
+        const ROLLER = ["room-r1-" + zamanDamgasi, "room-r2-" + zamanDamgasi, "room-r3-" + zamanDamgasi];
 
-        const statusBox = document.getElementById('status-box');
-        const muteBtn = document.getElementById('mute-btn');
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        const roomPanel = document.getElementById('room-panel');
-        const joinBtn = document.getElementById('join-btn');
-        const userList = document.getElementById('user-list');
-        const dimmerLayer = document.getElementById('dimmer-layer');
+        const DOM = {
+            status: document.getElementById('status-box'),
+            muteBtn: document.getElementById('mute-btn'),
+            discBtn: document.getElementById('disconnect-btn'),
+            roomPanel: document.getElementById('room-panel'),
+            userList: document.getElementById('user-list'),
+            dimmer: document.getElementById('dimmer-layer'),
+            joinBtn: document.getElementById('btn-join')
+        };
 
-        function durumGuncelle(mesaj, tip) {
-            statusBox.innerText = mesaj;
-            statusBox.className = "status-panel " + tip;
+        function durumGuncelle(mesaj, tip) { DOM.status.innerText = mesaj; DOM.status.className = "status-panel " + tip; }
+
+        // 1. Initial Mic Request (Page Load)
+        navigator.mediaDevices.getUserMedia({ 
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false 
+        }).then(stream => {
+            localStream = stream;
+            durumGuncelle("MİKROFON HAZIR, BEKLENİYOR", "status-ready");
+        }).catch(() => durumGuncelle("MIKROFON İZNİ REDDEDİLDİ!", "status-error"));
+
+        // 2. iOS AudioContext Fix: Init on User Interaction
+        function sistemiBaslat() {
+            myName = document.getElementById('rider-name').value.trim();
+            speedLimit = parseInt(document.getElementById('speed-limit').value) || 0;
+            
+            if(!myName) return alert("Lütfen adınızı yazın!");
+            if(!localStream) return alert("Mikrofon erişimi sağlanamadı!");
+
+            DOM.joinBtn.disabled = true;
+            durumGuncelle("SİSTEMLER BAŞLATILIYOR...", "status-ready");
+
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            setupVUMeter(localStream);
+            setupGPSAndMap();
+            setupMediaSession();
+            tryConnect(0);
         }
 
-        // [MÜZİK KİLİDİNİ AÇAN KRİTİK GÜNCELLEME]
-        // Tarayıcıya diğer müzikleri kapatmamasını, onlarla MIX olmasını emrediyoruz
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.audioWorklet) {
-            // Arka planda ses çalma odağını esneten tarayıcı ayarı
-            navigator.mediaDevices.getUserMedia({ 
-                audio: { 
-                    echoCancellation: true, noiseSuppression: true, autoGainControl: true,
-                    channelCount: 1, sampleRate: 44100
-                }, video: false 
-            }).then(stream => {
-                localStream = stream;
-                durumGuncelle("GRUBA KATILMAYA HAZIR", "status-ready");
-                setupVUMeter(stream);
-                setupGPS(); // GPS Başlat
-                setupMediaSession(); // Bluetooth Kulaklık Tuşlarını Dinle
-            }).catch(() => durumGuncelle("MİKROFON İZNİ EKSİK!", "status-error"));
+        function ayarlariAcKapat() {
+            let panel = document.getElementById('settings-panel');
+            panel.style.display = panel.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleFeature(elementId, isVisible) {
+            let el = document.getElementById(elementId);
+            el.style.display = isVisible ? "block" : "none";
+            if(elementId === "map-container" && isVisible && map) { setTimeout(() => map.invalidateSize(), 200); }
         }
 
         function hudGuncelle() {
-            userList.innerHTML = "";
-            // Kendimiz
-            let li = document.createElement('li');
-            li.className = "user-item";
+            DOM.userList.innerHTML = "";
+            let li = document.createElement('li'); li.className = "user-item";
             li.innerHTML = `<span>👤 ${myName} (Sen)</span> <span class="user-status ${isMuted ? 'btn-muted' : 'status-speaking'}">${isMuted ? 'MUTED' : 'KONUŞUYOR'}<div class="vu-meter"><div class="vu-bar" id="my-vu"></div></div></span>`;
-            userList.appendChild(li);
+            DOM.userList.appendChild(li);
 
-            // Gruptaki Diğerleri
             ROLLER.forEach((role, idx) => {
                 if(role !== myRole) {
                     let u = groupUsers[role];
-                    let liX = document.createElement('li');
-                    liX.className = "user-item";
-                    liX.innerHTML = `<span>🏍️ ${u ? u.name : 'Sürücü ' + (idx+1)}</span> <span class="user-status ${u ? (u.muted ? 'btn-muted' : 'status-speaking') : 'status-offline'}">${u ? (u.muted ? 'MUTED' : 'BAĞLI') : 'YOLDA (GELMEDİ)'}</span>`;
-                    userList.appendChild(liX);
+                    let liX = document.createElement('li'); liX.className = "user-item";
+                    liX.innerHTML = `<span>🏍️ ${u ? u.name : 'Sürücü ' + (idx+1)}</span> <span class="user-status ${u ? (u.muted ? 'btn-muted' : 'status-speaking') : 'status-offline'}">${u ? (u.muted ? 'MUTED' : 'BAĞLI') : 'GELMEDİ'}</span>`;
+                    DOM.userList.appendChild(liX);
                 }
             });
         }
 
-        function odayaBaglan() {
-            myName = document.getElementById('rider-name').value.trim();
-            speedLimit = parseInt(document.getElementById('speed-limit').value) || 0;
-            if(!myName) return alert("Lütfen adınızı yazın!");
-
-            durumGuncelle("GİRİŞ YAPILIYOR...", "status-ready");
-            joinBtn.disabled = true;
-            tryConnect(0); // 1. Rolü kapmaya çalış
-        }
-
-        // [YENİ] 3 Kişilik Mesh Bağlantı Döngüsü
         function tryConnect(roleIdx) {
-            if(roleIdx >= ROLLER.length) {
-                durumGuncelle("ODA DOLU!", "status-error");
-                joinBtn.disabled = false;
-                return;
+            if(roleIdx >= ROLLER.length) { 
+                durumGuncelle("ODA DOLU!", "status-error"); 
+                DOM.joinBtn.disabled = false;
+                return; 
             }
-
+            
             myRole = ROLLER[roleIdx];
             peer = new Peer(myRole, { config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] } });
 
             peer.on('open', () => {
                 durumGuncelle("GRUP ODASINDASIN", "status-ready");
-                surusModu(true);
-                hudGuncelle();
+                surusModu(true); hudGuncelle();
                 pilTasarrufuZamanlayiciBaslat();
-
-                // Odadaki diğer muhtemel rollerle el sıkışmayı dene
+                
                 ROLLER.forEach(targetRole => {
                     if(targetRole !== myRole) {
-                        let call = peer.call(targetRole, localStream);
-                        if(call) handleCall(call, targetRole);
-                        let conn = peer.connect(targetRole);
-                        if(conn) handleData(conn, targetRole);
+                        peer.call(targetRole, localStream);
+                        peer.connect(targetRole);
                     }
                 });
             });
 
-            peer.on('error', (err) => {
-                if (err.type === 'unavailable-id') {
-                    peer.destroy();
-                    tryConnect(roleIdx + 1); // Sıradaki rolü dene (B veya C)
-                }
-            });
-
+            peer.on('error', (err) => { if (err.type === 'unavailable-id') { peer.destroy(); tryConnect(roleIdx + 1); } });
             peer.on('call', call => { call.answer(localStream); handleCall(call, call.peer); });
             peer.on('connection', conn => { handleData(conn, conn.peer); });
+            
+            // Reconnection resilience
+            peer.on('disconnected', () => {
+                durumGuncelle("AĞ KOPTU, YENİDEN BAĞLANILIYOR...", "status-error");
+                peer.reconnect();
+            });
         }
 
         function handleCall(call, roleId) {
             call.on('stream', rStream => {
                 let slot = (roleId === ROLLER[0] || (roleId === ROLLER[1] && myRole === ROLLER[2])) ? "1" : "2";
-                document.getElementById('remote-audio-' + slot).srcObject = rStream;
-                if(!groupUsers[roleId]) groupUsers[roleId] = { name: "Arkadaşın", muted: false };
+                let audioEl = document.getElementById('remote-audio-' + slot);
+                audioEl.srcObject = rStream;
+                if(!groupUsers[roleId]) groupUsers[roleId] = { name: "Bağlanıyor...", muted: false };
                 hudGuncelle();
             });
         }
 
         function handleData(conn, roleId) {
-            conn.on('open', () => { conn.send({ type: 'sync', name: myName, muted: isMuted }); });
+            conn.on('open', () => { 
+                sendSync(conn); 
+                syncInterval = setInterval(() => sendSync(conn), 3000); 
+            });
             conn.on('data', data => {
                 if(data.type === 'sync') {
-                    groupUsers[roleId] = { name: data.name, muted: data.muted };
+                    groupUsers[roleId] = { name: data.name, muted: data.muted, lat: data.lat, lng: data.lng };
                     durumGuncelle("GRUP AKTİF", "status-connected");
                     hudGuncelle();
+                    updateMapMarkers();
                 }
             });
+            conn.on('close', () => clearInterval(syncInterval));
         }
 
-        // [YENİ] GPS HIZ TAKİBİ & RADAR SİSTEMİ
-        function setupGPS() {
-            if (!navigator.geolocation) return;
-            navigator.geolocation.watchPosition(position => {
-                let speedInMs = position.coords.speed; // m/s cinsinden gelir
-                if (speedInMs !== null && speedInMs > 0) {
-                    let kmh = Math.round(speedInMs * 3.6);
-                    document.getElementById('speed-display').innerText = kmh;
-                    
-                    // Radar uyarısı tetikleme
-                    let gpsPanel = document.getElementById('gps-panel');
-                    if(speedLimit > 0 && kmh > speedLimit) {
-                        gpsPanel.className = "gps-hud radar-warning";
-                    } else {
-                        gpsPanel.className = "gps-hud";
-                    }
-                }
-            }, () => {}, { enableHighAccuracy: true });
-        }
-
-        // [YENİ] BLUETOOTH KULAKLIK / İNTERKOM DÜĞME DESTEĞİ
-        function setupMediaSession() {
-            if ('mediaSession' in navigator) {
-                // Kask interkomundaki "Şarkıyı durdur/oynat" tuşuna basınca Mute tetiklenir!
-                navigator.mediaSession.setActionHandler('play', () => sesiSustur());
-                navigator.mediaSession.setActionHandler('pause', () => sesiSustur());
+        function sendSync(conn) {
+            if(conn && conn.open) {
+                let loc = myMarker ? myMarker.getLatLng() : {lat: null, lng: null};
+                conn.send({ type: 'sync', name: myName, muted: isMuted, lat: loc.lat, lng: loc.lng });
             }
         }
 
+        // Optimized Anti-Flutter Noise Gate
         function setupVUMeter(stream) {
+            if(vuInterval) clearInterval(vuInterval);
+            
             let analyser = audioCtx.createAnalyser();
             let source = audioCtx.createMediaStreamSource(stream);
-            source.connect(analyser);
-            analyser.fftSize = 64;
+            source.connect(analyser); analyser.fftSize = 64;
             let dataArray = new Uint8Array(analyser.frequencyBinCount);
-            setInterval(() => {
+            
+            vuInterval = setInterval(() => {
                 if (!isMuted && peer && !peer.destroyed) {
                     analyser.getByteFrequencyData(dataArray);
                     let total = 0; for (let i = 0; i < dataArray.length; i++) total += dataArray[i];
                     let volume = (total / dataArray.length) * 3;
+                    
+                    if(document.getElementById('cfg-filter').checked) {
+                        if(volume > 12) {
+                            localStream.getAudioTracks()[0].enabled = true;
+                            clearTimeout(filterHoldTimeout);
+                            filterHoldTimeout = setTimeout(() => {
+                                if(!isMuted) localStream.getAudioTracks()[0].enabled = false;
+                            }, 1500); // 1.5 saniyelik Hold (Yumuşak kapanış)
+                        }
+                    } else if(!isMuted) {
+                        localStream.getAudioTracks()[0].enabled = true;
+                    }
+
                     let bar = document.getElementById('my-vu');
                     if(bar) bar.style.width = Math.min(volume, 100) + "%";
                 }
             }, 100);
         }
 
-        function pilTasarrufuZamanlayiciBaslat() {
-            clearTimeout(dimmerTimeout);
-            dimmerTimeout = setTimeout(() => { if(peer) dimmerLayer.style.display = "flex"; }, 15000);
+        function setupGPSAndMap() {
+            if(!map) {
+                map = L.map('map-container').setView([41.0082, 28.9784], 15);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+            }
+
+            if (!navigator.geolocation) return;
+            
+            if(gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+            
+            gpsWatchId = navigator.geolocation.watchPosition(position => {
+                let lat = position.coords.latitude;
+                let lng = position.coords.longitude;
+                let speed = position.coords.speed;
+
+                if (!myMarker) {
+                    myMarker = L.marker([lat, lng]).addTo(map).bindPopup("Sen");
+                } else {
+                    myMarker.setLatLng([lat, lng]);
+                }
+                if(document.getElementById('cfg-map').checked) map.panTo([lat, lng]);
+
+                if (speed !== null && speed > 0) {
+                    currentSpeed = Math.round(speed * 3.6);
+                    document.getElementById('speed-display').innerText = currentSpeed;
+                    
+                    let gpsPanel = document.getElementById('gps-panel');
+                    if(speedLimit > 0 && currentSpeed > speedLimit) { gpsPanel.className = "gps-hud radar-warning"; } 
+                    else { gpsPanel.className = "gps-hud"; }
+
+                    if(document.getElementById('cfg-autovol').checked) {
+                        let volFactor = currentSpeed > 80 ? 1.0 : (currentSpeed > 40 ? 0.8 : 0.6);
+                        ["remote-audio-1", "remote-audio-2"].forEach(id => {
+                            let el = document.getElementById(id); if(el) el.volume = volFactor;
+                        });
+                    }
+                }
+            }, () => {}, { enableHighAccuracy: true });
         }
 
-        function ekraniUyandir() { dimmerLayer.style.display = "none"; pilTasarrufuZamanlayiciBaslat(); }
+        function updateMapMarkers() {
+            if(!map) return;
+            Object.keys(groupUsers).forEach(roleId => {
+                let u = groupUsers[roleId];
+                if(u.lat && u.lng) {
+                    if(!peerMarkers[roleId]) {
+                        peerMarkers[roleId] = L.marker([u.lat, u.lng]).addTo(map).bindPopup(u.name);
+                    } else {
+                        peerMarkers[roleId].setLatLng([u.lat, u.lng]);
+                    }
+                }
+            });
+        }
 
+        function setupMediaSession() {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.setActionHandler('play', () => sesiSustur());
+                navigator.mediaSession.setActionHandler('pause', () => sesiSustur());
+            }
+        }
+
+        function pilTasarrufuZamanlayiciBaslat() {
+            clearTimeout(dimmerTimeout);
+            if(!document.getElementById('cfg-battery').checked) return;
+            dimmerTimeout = setTimeout(() => { if(peer) DOM.dimmer.style.display = "flex"; }, 15000);
+        }
+
+        function ekraniUyandir() { DOM.dimmer.style.display = "none"; pilTasarrufuZamanlayiciBaslat(); }
+        
         function surusModu(aktif) {
-            roomPanel.style.display = aktif ? "none" : "block";
-            muteBtn.style.display = aktif ? "block" : "none";
-            disconnectBtn.style.display = aktif ? "block" : "none";
-            if(!aktif) { joinBtn.disabled = false; groupUsers = {}; hudGuncelle(); }
+            DOM.roomPanel.style.display = aktif ? "none" : "block";
+            DOM.muteBtn.style.display = aktif ? "block" : "none";
+            DOM.discBtn.style.display = aktif ? "block" : "none";
+            toggleFeature('gps-panel', document.getElementById('cfg-gps').checked && aktif);
+            toggleFeature('map-container', document.getElementById('cfg-map').checked && aktif);
+            
+            if(!aktif) { 
+                isMuted = false; 
+                groupUsers = {}; 
+                hudGuncelle(); 
+                DOM.joinBtn.disabled = false;
+            }
         }
 
         function sesiSustur() {
             if(!localStream) return;
             isMuted = !isMuted;
+            
+            // Eğer rüzgar filtresi açıksa ve sessize aldıysak kilitlenmesini önle
+            if(isMuted) clearTimeout(filterHoldTimeout);
+            
             localStream.getAudioTracks()[0].enabled = !isMuted; 
-            muteBtn.innerText = isMuted ? "🔇 SESİN GİTMİYOR" : "🎤 MİKROFONU SUSTUR";
-            muteBtn.className = isMuted ? "btn btn-mute btn-muted" : "btn btn-mute";
-            hudGuncelle();
-            pilTasarrufuZamanlayiciBaslat();
+            DOM.muteBtn.innerText = isMuted ? "🔇 SESİN GİTMİYOR" : "🎤 MİKROFONU SUSTUR";
+            DOM.muteBtn.className = isMuted ? "btn btn-mute btn-muted" : "btn btn-mute";
+            hudGuncelle(); pilTasarrufuZamanlayiciBaslat();
         }
 
+        // Garbage Collection & Full Reset
         function odadanAyril() {
+            // Bellekleri temizle
+            clearInterval(vuInterval);
+            clearInterval(syncInterval);
             clearTimeout(dimmerTimeout);
+            clearTimeout(filterHoldTimeout);
+            if(gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+            
             if(peer) peer.destroy();
+            
             document.getElementById('remote-audio-1').srcObject = null;
             document.getElementById('remote-audio-2').srcObject = null;
-            durumGuncelle("ODAYA GİRMEYE HAZIR", "status-ready");
+            
+            durumGuncelle("ODADAN AYRILDINIZ", "status-ready");
             surusModu(false);
         }
+        
         document.body.addEventListener('click', () => { if(peer) pilTasarrufuZamanlayiciBaslat(); });
     </script>
 </body>
