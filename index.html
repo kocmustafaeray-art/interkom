@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>İnterkom</title>
+    <title>RideCom </title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -14,32 +14,55 @@
             min-height: 100vh; padding: 20px;
         }
         .header h1 { font-size: 26px; color: #ff9800; text-align: center; letter-spacing: 2px; margin-top: 10px; }
+        
+        /* HUD Durum Paneli */
         .status-panel { background: #1e1e1e; border-left: 5px solid #555; padding: 15px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 16px; margin: 15px 0; }
         .status-ready { border-left-color: #ff9800; color: #ff9800; }
-        .status-connected { border-left-color: #00e676; color: #00e676; animation: pulse 2s infinite; }
+        .status-connected { border-left-color: #00e676; color: #00e676; }
         .status-error { border-left-color: #ff1744; color: #ff1744; }
-        @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
+
+        /* Canlı HUD Göstergesi */
+        .hud-container { background: #1e1e1e; padding: 20px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .hud-title { font-size: 12px; color: #aaa; text-transform: uppercase; margin-bottom: 10px; display: block; letter-spacing: 1px; }
+        .user-list { list-style: none; }
+        .user-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #2d2d2d; margin-bottom: 8px; border-radius: 8px; font-weight: bold; }
+        .user-status { font-size: 12px; padding: 4px 8px; border-radius: 4px; }
+        .status-online { background: #00e676; color: #121212; }
+        .status-speaking { background: #0288d1; color: white; animation: pulse 1s infinite; }
+
         .room-section { background: #1e1e1e; padding: 20px; border-radius: 12px; text-align: center; margin: 15px 0; }
         .btn { width: 100%; padding: 22px; font-size: 18px; font-weight: bold; border-radius: 12px; border: none; cursor: pointer; text-transform: uppercase; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
-        .btn-join { background: #ff9800; color: #121212; }
+        .btn-join { background: #ff9800; color: #121212; margin-top: 15px; }
         .btn-mute { background: #0288d1; color: white; display: none; }
-        .btn-muted { background: #d32f2f; color: white; animation: pulse 1s infinite; }
+        .btn-muted { background: #d32f2f; color: white; }
         .btn-disconnect { background: #b71c1c; color: white; display: none; }
+        
+        input[type="text"] { width: 100%; padding: 15px; font-size: 16px; background: #2d2d2d; border: 2px solid #444; color: white; border-radius: 8px; text-align: center; outline: none; }
+        input[type="text"]:focus { border-color: #ff9800; }
+        
+        @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
         .footer { text-align: center; font-size: 11px; color: #444; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1>🏍️Yolculuk</h1>
+        <h1>🏍️ Yolculuk</h1>
     </div>
 
     <div class="status-panel" id="status-box">Sistem Başlatılıyor...</div>
 
+    <div class="hud-container">
+        <span class="hud-title">📊 Odadaki Cihazlar (HUD)</span>
+        <ul class="user-list" id="user-list">
+            <li style="color: #666; font-style: italic; font-size: 14px; text-align: center;" id="no-user-text">Odaya henüz giriş yapılmadı.</li>
+        </ul>
+    </div>
+
     <div class="room-section" id="room-panel">
-        <span style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">BAĞLANILACAK ORTAK ODA</span>
-        <h2 style="color: #ff9800; letter-spacing: 1px;">SÜRÜŞ ODASI ACTIVE</h2>
-        <button class="btn btn-join" id="join-btn" style="margin-top: 20px;" onclick="odayaBaglan()">Odaya Gir ve Bağlan</button>
+        <span style="font-size: 12px; color: #aaa; display: block; margin-bottom: 10px;">SÜRÜCÜ ADINIZI YAZIN</span>
+        <input type="text" id="rider-name" placeholder="Örn: Ahmet (Telefon) veya PC">
+        <button class="btn btn-join" id="join-btn" onclick="odayaBaglan()">Odaya Gir ve Başlan</button>
     </div>
 
     <div id="ride-controls">
@@ -47,19 +70,18 @@
         <button class="btn btn-disconnect" id="disconnect-btn" onclick="odadanAyril()">❌ ODADAN AYRIL</button>
     </div>
 
-    <div class="footer">v7.0 - Akıllı Eşleşme Paneli</div>
+    <div class="footer">v8.0 - Canlı Cihaz HUD Modu</div>
 
     <audio id="remote-audio" autoplay playsinline></audio>
 
     <script>
         let localStream, currentCall, isMuted = false;
-        let peer = null;
+        let peer = null, dataConn = null;
+        let myName = "";
+        let peerName = "";
         
-        // Sunucunun kafası karışmasın diye her saate özel taze oda kodları üretiyoruz
         const d = new Date();
         const zamanDamgasi = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate() + "-" + d.getHours();
-        
-        // Cihazların kimlikleri (Biri A diğeri B olacak)
         const ODA_A = "ride-room-id-a-" + zamanDamgasi;
         const ODA_B = "ride-room-id-b-" + zamanDamgasi;
         
@@ -68,6 +90,8 @@
         const disconnectBtn = document.getElementById('disconnect-btn');
         const roomPanel = document.getElementById('room-panel');
         const joinBtn = document.getElementById('join-btn');
+        const userList = document.getElementById('user-list');
+        const noUserText = document.getElementById('no-user-text');
 
         function durumGuncelle(mesaj, tip) {
             statusBox.innerText = mesaj;
@@ -79,53 +103,73 @@
         }).then(stream => {
             localStream = stream;
             durumGuncelle("ODAYA GİRMEYE HAZIR", "status-ready");
-        }).catch(() => {
-            durumGuncelle("MİKROFON İZNİ EKSİK!", "status-error");
-        });
+        }).catch(() => durumGuncelle("MİKROFON İZNİ EKSİK!", "status-error"));
+
+        // HUD Listesini Güncelleyen Fonksiyon
+        function hudGuncelle(bagli, pName = "Arkadaşın", pMuted = false) {
+            userList.innerHTML = "";
+            if(!bagli) {
+                userList.appendChild(noUserText);
+                return;
+            }
+            
+            // Kendimiz
+            let li1 = document.createElement('li');
+            li1.className = "user-item";
+            li1.innerHTML = `<span>👤 ${myName} (Sen)</span> <span class="user-status ${isMuted ? 'btn-muted' : 'status-speaking'}">${isMuted ? 'MUTED' : 'KONUŞUYOR'}</span>`;
+            userList.appendChild(li1);
+
+            // Karşı Taraf
+            let li2 = document.createElement('li');
+            li2.className = "user-item";
+            li2.innerHTML = `<span>🏍️ ${pName}</span> <span class="user-status ${pMuted ? 'btn-muted' : 'status-speaking'}">${pMuted ? 'MUTED' : 'KONUŞUYOR'}</span>`;
+            userList.appendChild(li2);
+        }
 
         function odayaBaglan() {
-            durumGuncelle("BAĞLANTI ARANIYOR...", "status-ready");
+            myName = document.getElementById('rider-name').value.trim();
+            if(!myName) return alert("Lütfen bir isim girin!");
+
+            durumGuncelle("ODAYA GİRİLİYOR...", "status-ready");
             joinBtn.disabled = true;
 
-            // Önce A kimliğiyle giriş yapmayı dene
-            peer = new Peer(ODA_A, {
-                config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }, { 'urls': 'stun:stun1.l.google.com:19302' }] }
-            });
+            peer = new Peer(ODA_A, { config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] } });
 
             peer.on('open', () => {
-                // Biz A olarak açıldık, şimdi karşı tarafın (B) girmesini bekliyoruz
-                durumGuncelle("ODADA BEKLENİYOR... ARKADAŞININ BUTONA BASMASINI BEKLE", "status-ready");
+                durumGuncelle("ODADA TEK BAŞINASIN. ARKADAŞIN BEKLENİYOR...", "status-ready");
                 surusModu(true);
+                userList.innerHTML = `<li class="user-item"><span>👤 ${myName} (Sen)</span> <span class="user-status status-online">BEKLİYOR</span></li>`;
             });
 
             peer.on('error', (err) => {
-                // Eğer A kimliği doluysa (yani PC veya telefon bu kodu kaptıysa) biz B olarak bağlanıp A'yı arıyoruz
                 if (err.type === 'unavailable-id') {
                     peer.destroy();
-                    
-                    peer = new Peer(ODA_B, {
-                        config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }, { 'urls': 'stun:stun1.l.google.com:19302' }] }
-                    });
+                    peer = new Peer(ODA_B, { config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] } });
 
                     peer.on('open', () => {
                         durumGuncelle("BAĞLANTI AKTİF!", "status-connected");
                         surusModu(true);
                         
-                        // Doğrudan A'yı ara
+                        // Ses ve Veri kanalını başlat
                         currentCall = peer.call(ODA_A, localStream);
                         handleCall(currentCall);
+
+                        dataConn = peer.connect(ODA_A);
+                        handleData(dataConn);
                     });
-                } else {
-                    durumGuncelle("BAĞLANTI HATASI!", "status-error");
-                    joinBtn.disabled = false;
                 }
             });
 
-            // Biz içeride beklerken B bize katılırsa burası tetiklenir
+            // Gelen Veri Bağlantısını Dinle (A cihazı için)
+            peer.on('connection', conn => {
+                dataConn = conn;
+                handleData(dataConn);
+            });
+
+            // Gelen Ses Çağrısını Dinle (A cihazı için)
             peer.on('call', call => {
                 currentCall = call;
                 durumGuncelle("BAĞLANTI AKTİF!", "status-connected");
-                surusModu(true);
                 call.answer(localStream);
                 handleCall(call);
             });
@@ -133,14 +177,26 @@
 
         function handleCall(call) {
             call.on('stream', rStream => {
-                const audio = document.getElementById('remote-audio');
-                audio.srcObject = rStream;
-                // iOS Safari için tetikleyici
-                audio.play().catch(() => {
-                    durumGuncelle("SESİ AÇMAK İÇİN EKRANA DOKUNUN!", "status-connected");
-                });
+                document.getElementById('remote-audio').srcObject = rStream;
             });
-            call.on('close', () => { odadanAyril(); });
+            call.on('close', () => odadanAyril());
+        }
+
+        // Veri Kanalını Yönetme (İsim ve Mute bilgisi taşır)
+        function handleData(conn) {
+            conn.on('open', () => {
+                // Bağlanır bağlanmaz kendi ismimizi karşıya gönderiyoruz
+                conn.send({ type: 'join', name: myName, muted: isMuted });
+            });
+
+            conn.on('data', data => {
+                if(data.type === 'join' || data.type === 'update') {
+                    peerName = data.name;
+                    durumGuncelle("BAĞLANTI AKTİF!", "status-connected");
+                    hudGuncelle(true, peerName, data.muted);
+                }
+            });
+            conn.on('close', () => odadanAyril());
         }
 
         function surusModu(aktif) {
@@ -149,10 +205,7 @@
             disconnectBtn.style.display = aktif ? "block" : "none";
             if(!aktif) {
                 joinBtn.disabled = false;
-                isMuted = false;
-                muteBtn.innerText = "🎤 MİKROFONU SUSTUR";
-                muteBtn.className = "btn btn-mute";
-                if(localStream) localStream.getAudioTracks()[0].enabled = true;
+                hudGuncelle(false);
             }
         }
 
@@ -160,13 +213,21 @@
             if(!localStream) return;
             isMuted = !isMuted;
             localStream.getAudioTracks()[0].enabled = !isMuted; 
-            muteBtn.innerText = isMuted ? "🔇 SESİN GİTMİYOR (KAPALI)" : "🎤 MİKROFONU SUSTUR";
+            muteBtn.innerText = isMuted ? "🔇 SESİN GİTMİYOR" : "🎤 MİKROFONU SUSTUR";
             muteBtn.className = isMuted ? "btn btn-mute btn-muted" : "btn btn-mute";
+            
+            // HUD Güncelle
+            hudGuncelle(true, peerName, false);
+            // Karşı tarafa susturduğumuzu haber ver
+            if(dataConn && dataConn.open) {
+                dataConn.send({ type: 'update', name: myName, muted: isMuted });
+            }
         }
 
         function odadanAyril() {
-            if(currentCall) { currentCall.close(); currentCall = null; }
-            if(peer) { peer.destroy(); peer = null; }
+            if(currentCall) currentCall.close();
+            if(dataConn) dataConn.close();
+            if(peer) peer.destroy();
             document.getElementById('remote-audio').srcObject = null;
             durumGuncelle("ODAYA GİRMEYE HAZIR", "status-ready");
             surusModu(false);
